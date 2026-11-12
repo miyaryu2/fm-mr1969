@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="robots" content="noindex,nofollow">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="フィールドマップ">
+<title>フィールドマップ</title>
+<style>
+/* レイアウト: 上=状態表示 / 中央=マップ(全面) / 下=操作パネル+モード切替 */
+:root{
+  --bg:#f3f4ef; --panel:#ffffff; --fg:#1c211b; --muted:#5d665b; --line:#d5d9cf;
+  --accent:#2f6b3c; --on-accent:#ffffff;
+  --me:#1565d8; --start:#d98200; --flag:#d42a2a; --warn:#b3261e;
+  --font:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#141813; --panel:#1e241d; --fg:#e8ece4; --muted:#9aa596; --line:#343c32;
+    --accent:#7fc48a; --on-accent:#10210f;
+    --me:#5aa2ff; --start:#ffb133; --flag:#ff6b62; --warn:#ff8a80;
+    color-scheme:dark;
+  }
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{
+  background:var(--bg);color:var(--fg);font:15px/1.5 var(--font);
+  display:flex;flex-direction:column;overflow:hidden;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
+}
+[hidden]{display:none!important}
+button{font:inherit;color:inherit}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+header{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  padding:calc(env(safe-area-inset-top,0px) + 8px) max(16px,env(safe-area-inset-right,0px)) 8px max(16px,env(safe-area-inset-left,0px));
+  background:var(--panel);border-bottom:1px solid var(--line);
+}
+header h1{font-size:15px;margin:0;font-weight:700;margin-right:auto}
+.chip{
+  font-size:12px;padding:2px 10px;border-radius:999px;border:1px solid var(--line);
+  color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+.chip.ok{color:var(--accent);border-color:var(--accent)}
+.chip.ng{color:var(--warn);border-color:var(--warn)}
+
+.mapwrap{flex:1;position:relative;min-height:0}
+#map{position:absolute;inset:0;overflow:hidden;touch-action:none;cursor:grab;background:var(--bg)}
+#stage{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
+#img{display:block;max-width:none;pointer-events:none;-webkit-user-drag:none}
+#marks{position:absolute;inset:0;pointer-events:none}
+.mk{position:absolute;left:0;top:0;will-change:transform}
+.pin{
+  position:absolute;transform:translate(-50%,-100%);
+  display:flex;flex-direction:column;align-items:center;
+}
+.pin b{
+  font-size:12px;font-weight:700;color:#fff;padding:2px 8px;border-radius:6px;white-space:nowrap;
+  box-shadow:0 1px 4px rgba(0,0,0,.4);
+}
+.pin i{width:2px;height:14px;background:currentColor;display:block}
+.pin u{width:8px;height:8px;border-radius:50%;background:currentColor;display:block;margin-top:-4px;margin-bottom:-4px;border:1px solid #fff}
+.pin.start{color:var(--start)} .pin.start b{background:var(--start)}
+.pin.flag{color:var(--flag)} .pin.flag b{background:var(--flag)}
+.me{
+  position:absolute;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;
+  background:var(--me);border:3px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.35),0 1px 6px rgba(0,0,0,.5);
+}
+.acc{position:absolute;border-radius:50%;background:var(--me);opacity:.18;border:1px solid var(--me)}
+.calpt{
+  position:absolute;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:4px;transform:rotate(45deg);
+  background:var(--panel);border:2px solid var(--fg);
+}
+.calpt span{position:absolute;inset:0;display:grid;place-items:center;transform:rotate(-45deg);font-size:11px;font-weight:700;color:var(--fg)}
+.pend{position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;border:2px solid var(--fg);border-radius:50%;background:rgba(255,255,255,.35)}
+.pend::before,.pend::after{content:"";position:absolute;background:var(--fg)}
+.pend::before{left:50%;top:-6px;bottom:-6px;width:2px;margin-left:-1px}
+.pend::after{top:50%;left:-6px;right:-6px;height:2px;margin-top:-1px}
+
+.hint{
+  position:absolute;top:10px;left:50%;transform:translateX(-50%);max-width:calc(100% - 32px);
+  background:var(--fg);color:var(--bg);padding:6px 14px;border-radius:999px;font-size:13px;font-weight:600;
+  pointer-events:none;text-align:center;
+}
+.sample{
+  position:absolute;left:max(16px,env(safe-area-inset-left,0px));bottom:12px;
+  background:var(--panel);border:1px solid var(--line);color:var(--muted);
+  font-size:12px;padding:4px 10px;border-radius:6px;pointer-events:none;
+}
+.fabs{
+  position:absolute;right:max(16px,env(safe-area-inset-right,0px));bottom:12px;
+  display:flex;flex-direction:column;gap:8px;
+}
+.fab{
+  width:46px;height:46px;border-radius:50%;border:1px solid var(--line);background:var(--panel);
+  font-size:11px;font-weight:700;box-shadow:0 1px 5px rgba(0,0,0,.25);padding:0;white-space:nowrap;
+}
+.fab.on{background:var(--me);color:#fff;border-color:var(--me)}
+
+#sheet{
+  background:var(--panel);border-top:1px solid var(--line);
+  padding:12px max(16px,env(safe-area-inset-right,0px)) 12px max(16px,env(safe-area-inset-left,0px));
+  max-height:46%;overflow-y:auto;display:flex;flex-direction:column;gap:10px;
+  -webkit-user-select:text;user-select:text;
+}
+#sheet p{margin:0;font-size:13px;color:var(--muted)}
+#sheet h2{margin:0;font-size:14px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.btn{
+  min-height:44px;padding:8px 14px;border-radius:10px;border:1px solid var(--line);background:var(--bg);
+  font-weight:600;font-size:14px;
+}
+.btn.pri{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.btn.danger{color:var(--warn)}
+.btn:disabled{opacity:.45}
+.inp{
+  flex:1;min-width:0;min-height:44px;padding:8px 12px;border-radius:10px;border:1px solid var(--line);
+  background:var(--bg);color:var(--fg);font:inherit;font-size:16px;
+}
+.pts{display:flex;flex-direction:column;gap:4px;font-size:13px;font-variant-numeric:tabular-nums}
+.pts div{display:flex;align-items:center;gap:8px;justify-content:space-between}
+.pts button{min-height:32px;padding:2px 10px;font-size:12px}
+
+nav{
+  display:grid;grid-template-columns:repeat(4,1fr);
+  background:var(--panel);border-top:1px solid var(--line);
+  padding:6px max(8px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 6px) max(8px,env(safe-area-inset-left,0px));
+  gap:6px;
+}
+nav button{
+  min-height:48px;border-radius:10px;border:1px solid transparent;background:transparent;
+  font-size:13px;font-weight:600;color:var(--muted);
+}
+nav button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
+</style>
+</head>
+<body>
+<header>
+  <h1>フィールドマップ</h1>
+  <span class="chip" id="calChip">位置合わせ 未設定</span>
+  <span class="chip" id="gpsChip">GPS 待機中</span>
+</header>
+
+<div class="mapwrap">
+  <div id="map">
+    <div id="stage"><img id="img" alt="フィールドマップ"></div>
+    <div id="marks">
+      <div class="mk" id="mkAcc" hidden><div class="acc"></div></div>
+      <div class="mk" id="mkStart" hidden><div class="pin start"><b>スタート</b><i></i><u></u></div></div>
+      <div class="mk" id="mkFlag" hidden><div class="pin flag"><b>フラッグ</b><i></i><u></u></div></div>
+      <div id="calMarks"></div>
+      <div class="mk" id="mkPend" hidden><div class="pend"></div></div>
+      <div class="mk" id="mkMe" hidden><div class="me"></div></div>
+    </div>
+  </div>
+  <div class="hint" id="hint" hidden></div>
+  <div class="sample" id="sampleTag" hidden>サンプルマップ表示中(設定から画像を読み込み)</div>
+  <div class="fabs">
+    <button class="fab" id="btnMe" type="button" aria-label="現在地を中央に表示">現在地</button>
+    <button class="fab" id="btnFit" type="button" aria-label="マップ全体を表示">全体</button>
+  </div>
+</div>
+
+<div id="sheet" hidden></div>
+
+<nav>
+  <button type="button" data-mode="start" aria-pressed="false">スタート</button>
+  <button type="button" data-mode="flag" aria-pressed="false">フラッグ</button>
+  <button type="button" data-mode="cal" aria-pressed="false">位置合わせ</button>
+  <button type="button" data-mode="menu" aria-pressed="false">設定</button>
+</nav>
+<input type="file" id="file" accept="image/*" hidden>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const map = $('map'), stage = $('stage'), img = $('img'), sheet = $('sheet');
+const LS_KEY = 'fieldmap.v1';
+
+const S = {
+  k: 1, tx: 0, ty: 0, imgW: 0, imgH: 0,
+  mode: 'view',            // view | start | flag | cal | menu
+  start: null, flag: null, // {x,y} 画像座標
+  cal: [],                 // [{x,y,lat,lon}]
+  pending: null,           // 位置合わせで選択中の画像座標
+  pos: null,               // {lat,lon,acc}
+  gpsErr: '', fit: null, follow: false, sample: false, wake: false,
+};
+
+/* ---------- 保存 ---------- */
+function save() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify({ start: S.start, flag: S.flag, cal: S.cal, wake: S.wake })); } catch (e) {}
+}
+function load() {
+  try {
+    const d = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+    S.start = d.start || null; S.flag = d.flag || null; S.cal = Array.isArray(d.cal) ? d.cal : []; S.wake = !!d.wake;
+  } catch (e) {}
+}
+function idb() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open('fieldmap', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('kv');
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+}
+async function idbGet(key) {
+  const db = await idb();
+  return new Promise((res, rej) => { const q = db.transaction('kv').objectStore('kv').get(key); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+}
+async function idbSet(key, val) {
+  const db = await idb();
+  return new Promise((res, rej) => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put(val, key); t.oncomplete = () => res(); t.onerror = () => rej(t.error); });
+}
+
+/* ---------- 座標変換(緯度経度 → 画像座標) ---------- */
+// 緯度経度を、基準点からの東向き・南向きの距離(m)に直す。画像のy軸が下向きなので南を正にする。
+function toLocal(lat, lon, o) {
+  return { u: (lon - o.lon) * Math.cos(o.lat * Math.PI / 180) * 111320, v: -(lat - o.lat) * 110540 };
+}
+// 2点: 相似変換(拡大・回転・移動)。3点以上: アフィン変換(最小二乗)。
+function computeFit(cal) {
+  const n = cal.length;
+  if (n < 2) return null;
+  const o = { lat: cal[0].lat, lon: cal[0].lon };
+  const g = cal.map(c => toLocal(c.lat, c.lon, o));
+  let gu = 0, gv = 0, px = 0, py = 0;
+  for (let i = 0; i < n; i++) { gu += g[i].u; gv += g[i].v; px += cal[i].x; py += cal[i].y; }
+  gu /= n; gv /= n; px /= n; py /= n;
+  let Suu = 0, Svv = 0, Suv = 0, Sux = 0, Svx = 0, Suy = 0, Svy = 0;
+  for (let i = 0; i < n; i++) {
+    const u = g[i].u - gu, v = g[i].v - gv, x = cal[i].x - px, y = cal[i].y - py;
+    Suu += u * u; Svv += v * v; Suv += u * v; Sux += u * x; Svx += v * x; Suy += u * y; Svy += v * y;
+  }
+  const den = Suu + Svv;
+  if (den < 1) return null; // 登録点どうしが1m未満
+  let a, b, c, d, kind;
+  const det = Suu * Svv - Suv * Suv;
+  if (n >= 3 && det > 1e-4 * den * den) {
+    a = (Sux * Svv - Svx * Suv) / det; b = (Svx * Suu - Sux * Suv) / det;
+    c = (Suy * Svv - Svy * Suv) / det; d = (Svy * Suu - Suy * Suv) / det;
+    kind = 'affine';
+  } else {
+    const re = (Sux + Svy) / den, im = (Suy - Svx) / den;
+    a = re; b = -im; c = im; d = re; kind = 'similar';
+  }
+  const scale = Math.sqrt(Math.abs(a * d - b * c)); // 画像px / m
+  if (!isFinite(scale) || scale === 0) return null;
+  return { o, gu, gv, px, py, a, b, c, d, scale, kind };
+}
+function geoToImg(lat, lon, f) {
+  const l = toLocal(lat, lon, f.o), u = l.u - f.gu, v = l.v - f.gv;
+  return { x: f.a * u + f.b * v + f.px, y: f.c * u + f.d * v + f.py };
+}
+
+/* ---------- 表示 ---------- */
+function mapSize() { const r = map.getBoundingClientRect(); return { w: r.width, h: r.height, l: r.left, t: r.top }; }
+function fitView() {
+  const m = mapSize(); if (!S.imgW || !m.w) return;
+  S.k = Math.min(m.w / S.imgW, m.h / S.imgH) * 0.96;
+  S.tx = (m.w - S.imgW * S.k) / 2; S.ty = (m.h - S.imgH * S.k) / 2;
+  S.follow = false; render();
+}
+function zoomAt(cx, cy, f) {
+  const m = mapSize(), minK = Math.min(m.w / S.imgW, m.h / S.imgH) * 0.5, maxK = 12;
+  const nk = Math.max(minK, Math.min(maxK, S.k * f)); f = nk / S.k;
+  S.tx = cx - (cx - S.tx) * f; S.ty = cy - (cy - S.ty) * f; S.k = nk;
+}
+function place(el, p) {
+  if (!p) { el.hidden = true; return; }
+  el.hidden = false;
+  el.style.transform = `translate(${(S.tx + p.x * S.k).toFixed(1)}px,${(S.ty + p.y * S.k).toFixed(1)}px)`;
+}
+function mePoint() { return (S.fit && S.pos) ? geoToImg(S.pos.lat, S.pos.lon, S.fit) : null; }
+function render() {
+  stage.style.transform = `translate(${S.tx}px,${S.ty}px) scale(${S.k})`;
+  place($('mkStart'), S.start); place($('mkFlag'), S.flag);
+  place($('mkPend'), S.mode === 'cal' ? S.pending : null);
+  const me = mePoint();
+  place($('mkMe'), me); place($('mkAcc'), me);
+  if (me) {
+    const r = Math.max(9, S.pos.acc * S.fit.scale * S.k), a = $('mkAcc').firstElementChild;
+    a.style.width = a.style.height = (2 * r) + 'px'; a.style.margin = `${-r}px 0 0 ${-r}px`;
+  }
+  const cm = $('calMarks'); cm.hidden = S.mode !== 'cal';
+  if (!cm.hidden) [...cm.children].forEach((el, i) => place(el, S.cal[i]));
+  $('btnMe').classList.toggle('on', S.follow);
+}
+function rebuildCalMarks() {
+  $('calMarks').innerHTML = S.cal.map((_, i) => `<div class="mk"><div class="calpt"><span>${i + 1}</span></div></div>`).join('');
+}
+function renderStatus() {
+  const cc = $('calChip'), gc = $('gpsChip'), n = S.cal.length;
+  cc.textContent = S.fit ? `位置合わせ ${n}点` : (n ? `位置合わせ ${n}点(あと${2 - n}点)` : '位置合わせ 未設定');
+  cc.className = 'chip' + (S.fit ? ' ok' : '');
+  if (S.gpsErr) { gc.textContent = S.gpsErr; gc.className = 'chip ng'; }
+  else if (S.pos) {
+    let out = false; const me = mePoint();
+    if (me) { const mx = S.imgW * 0.5, my = S.imgH * 0.5; out = me.x < -mx || me.x > S.imgW + mx || me.y < -my || me.y > S.imgH + my; }
+    gc.textContent = `GPS ±${Math.round(S.pos.acc)}m` + (out ? '・マップ範囲外' : '');
+    gc.className = 'chip' + (S.pos.acc <= 15 && !out ? ' ok' : '');
+  } else { gc.textContent = 'GPS 取得中'; gc.className = 'chip'; }
+}
+function fmt(v) { return v.toFixed(6); }
+function renderSheet() {
+  const hint = $('hint');
+  document.querySelectorAll('nav button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === S.mode)));
+  hint.hidden = !(S.mode === 'start' || S.mode === 'flag');
+  if (S.mode === 'start') hint.textContent = 'スタート位置をタップ';
+  if (S.mode === 'flag') hint.textContent = 'フラッグ位置をタップ';
+  let h = '';
+  if (S.mode === 'start' || S.mode === 'flag') {
+    const has = S.mode === 'start' ? S.start : S.flag, name = S.mode === 'start' ? 'スタート' : 'フラッグ';
+    h = `<div class="row"><button class="btn pri" data-act="done">完了</button>
+      <button class="btn danger" data-act="clear-${S.mode}" ${has ? '' : 'disabled'}>${name}を消す</button></div>`;
+  } else if (S.mode === 'cal') {
+    const gps = S.pos ? `いま立っている場所として登録(GPS ±${Math.round(S.pos.acc)}m)` : '現在地が取得できていません';
+    h = `<h2>位置合わせ</h2>
+      <p>マップ上の地点と実際の座標を対応づけます。2点で現在地が表示され、離れた3点以上で精度が上がります。</p>`;
+    if (S.pending) {
+      h += `<div class="row"><button class="btn pri" data-act="cal-gps" ${S.pos ? '' : 'disabled'}>${gps}</button></div>
+        <div class="row"><input class="inp" id="latlon" inputmode="text" autocomplete="off" placeholder="緯度, 経度(例 35.443700, 139.638000)">
+        <button class="btn" data-act="cal-manual">座標で登録</button></div>
+        <p id="calMsg">座標は、Googleマップで地点を長押しすると表示される数値を貼り付けられます。</p>
+        <div class="row"><button class="btn" data-act="cal-cancel">選択を取り消す</button></div>`;
+    } else {
+      h += `<p><strong>マップ上で、場所が特定できる目印(建物の角、入口など)をタップしてください。</strong></p>`;
+    }
+    if (S.cal.length) {
+      h += `<div class="pts">` + S.cal.map((c, i) =>
+        `<div><span>${i + 1}. ${fmt(c.lat)}, ${fmt(c.lon)}</span><button class="btn danger" data-act="cal-del" data-i="${i}">削除</button></div>`).join('') + `</div>`;
+    }
+    h += `<div class="row"><button class="btn pri" data-act="done">完了</button></div>`;
+  } else if (S.mode === 'menu') {
+    h = `<h2>設定</h2>
+      <div class="row"><button class="btn pri" data-act="pick">マップ画像を読み込む</button>
+      <button class="btn" data-act="wake">画面を消灯しない: ${S.wake ? 'オン' : 'オフ'}</button></div>
+      <p>画像を読み込むと、スタート・フラッグ・位置合わせは新しいマップ用にリセットされます。画像と位置データはこの端末内にだけ保存されます。</p>
+      <div class="row"><button class="btn danger" data-act="reset-cal" ${S.cal.length ? '' : 'disabled'}>位置合わせをすべて消す</button>
+      <button class="btn" data-act="done">閉じる</button></div>
+      <p id="menuMsg"></p>`;
+  }
+  sheet.innerHTML = h; sheet.hidden = !h;
+  $('sampleTag').hidden = !S.sample || S.mode !== 'view';
+  requestAnimationFrame(render);
+}
+function refit() { S.fit = computeFit(S.cal); rebuildCalMarks(); renderStatus(); }
+function setMode(m) { S.mode = (S.mode === m) ? 'view' : m; S.pending = null; renderSheet(); }
+
+/* ---------- 操作(ドラッグ・ピンチ・タップ) ---------- */
+const ptrs = new Map(); let tap = null;
+map.addEventListener('pointerdown', e => {
+  map.setPointerCapture(e.pointerId);
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  tap = ptrs.size === 1 ? { x: e.clientX, y: e.clientY, moved: false } : null;
+});
+map.addEventListener('pointermove', e => {
+  const p = ptrs.get(e.pointerId); if (!p) return;
+  if (ptrs.size === 1) {
+    S.tx += e.clientX - p.x; S.ty += e.clientY - p.y;
+    if (tap && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > 10) { tap.moved = true; S.follow = false; }
+    p.x = e.clientX; p.y = e.clientY;
+  } else if (ptrs.size === 2) {
+    const m = mapSize(), o = [...ptrs.values()].find(q => q !== p);
+    const d0 = Math.hypot(p.x - o.x, p.y - o.y), c0 = { x: (p.x + o.x) / 2, y: (p.y + o.y) / 2 };
+    p.x = e.clientX; p.y = e.clientY;
+    const d1 = Math.hypot(p.x - o.x, p.y - o.y), c1 = { x: (p.x + o.x) / 2, y: (p.y + o.y) / 2 };
+    S.tx += c1.x - c0.x; S.ty += c1.y - c0.y;
+    if (d0 > 0) zoomAt(c1.x - m.l, c1.y - m.t, d1 / d0);
+    S.follow = false;
+  }
+  render();
+});
+function endPtr(e) {
+  ptrs.delete(e.pointerId);
+  if (e.type === 'pointerup' && tap && !tap.moved && ptrs.size === 0) onTap(e.clientX, e.clientY);
+  if (ptrs.size === 0) tap = null;
+}
+map.addEventListener('pointerup', endPtr); map.addEventListener('pointercancel', endPtr);
+map.addEventListener('wheel', e => {
+  e.preventDefault(); const m = mapSize();
+  zoomAt(e.clientX - m.l, e.clientY - m.t, Math.exp(-e.deltaY * 0.0015)); S.follow = false; render();
+}, { passive: false });
+
+function onTap(cx, cy) {
+  const m = mapSize(), x = (cx - m.l - S.tx) / S.k, y = (cy - m.t - S.ty) / S.k;
+  if (x < 0 || y < 0 || x > S.imgW || y > S.imgH) return;
+  if (S.mode === 'start') { S.start = { x, y }; save(); renderSheet(); }
+  else if (S.mode === 'flag') { S.flag = { x, y }; save(); renderSheet(); }
+  else if (S.mode === 'cal') { S.pending = { x, y }; renderSheet(); }
+}
+function addCal(lat, lon) {
+  S.cal.push({ x: S.pending.x, y: S.pending.y, lat, lon }); S.pending = null;
+  save(); refit(); renderSheet();
+}
+sheet.addEventListener('click', e => {
+  const b = e.target.closest('button[data-act]'); if (!b) return;
+  const act = b.dataset.act;
+  if (act === 'done') { S.mode = 'view'; S.pending = null; renderSheet(); }
+  else if (act === 'clear-start') { S.start = null; save(); renderSheet(); }
+  else if (act === 'clear-flag') { S.flag = null; save(); renderSheet(); }
+  else if (act === 'cal-cancel') { S.pending = null; renderSheet(); }
+  else if (act === 'cal-gps') { if (S.pos && S.pending) addCal(S.pos.lat, S.pos.lon); }
+  else if (act === 'cal-manual') {
+    const t = ($('latlon').value || '').replace(/[()（）]/g, '').split(/[\s,、，]+/).filter(Boolean).map(Number);
+    if (t.length === 2 && t.every(isFinite) && Math.abs(t[0]) <= 90 && Math.abs(t[1]) <= 180) addCal(t[0], t[1]);
+    else { $('calMsg').textContent = '読み取れませんでした。「緯度, 経度」の順に、数値を2つ入力してください。'; $('calMsg').style.color = 'var(--warn)'; }
+  }
+  else if (act === 'cal-del') { S.cal.splice(+b.dataset.i, 1); save(); refit(); renderSheet(); }
+  else if (act === 'reset-cal') { S.cal = []; save(); refit(); renderSheet(); }
+  else if (act === 'pick') { $('file').click(); }
+  else if (act === 'wake') { S.wake = !S.wake; save(); applyWake(); renderSheet(); }
+});
+document.querySelector('nav').addEventListener('click', e => { const b = e.target.closest('button[data-mode]'); if (b) setMode(b.dataset.mode); });
+$('btnFit').addEventListener('click', fitView);
+$('btnMe').addEventListener('click', () => {
+  const me = mePoint();
+  if (!me) { if (!S.fit && S.mode !== 'cal') setMode('cal'); return; }
+  S.follow = !S.follow; if (S.follow) centerOn(me); render();
+});
+function centerOn(p) { const m = mapSize(); S.tx = m.w / 2 - p.x * S.k; S.ty = m.h / 2 - p.y * S.k; }
+
+/* ---------- マップ画像 ---------- */
+function showImage(blob, sample) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(blob);
+    img.onload = () => { S.imgW = img.naturalWidth; S.imgH = img.naturalHeight; S.sample = sample; $('sampleTag').hidden = !sample; fitView(); res(); };
+    img.onerror = () => rej(new Error('画像を表示できません'));
+    img.src = url;
+  });
+}
+function sampleBlob() {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800" font-family="sans-serif">
+  <rect width="1200" height="800" fill="#cfd8b8"/>
+  <rect x="40" y="40" width="1120" height="720" fill="#b7c79a" stroke="#4d5a3a" stroke-width="6"/>
+  <path d="M40 420 C300 360 520 520 760 430 S1060 380 1160 440" fill="none" stroke="#e6dcc0" stroke-width="34"/>
+  <g fill="#6f7f52"><circle cx="230" cy="210" r="70"/><circle cx="330" cy="250" r="55"/><circle cx="900" cy="620" r="80"/><circle cx="1010" cy="580" r="50"/><circle cx="520" cy="660" r="45"/></g>
+  <g fill="#8a6a44" stroke="#4d3a22" stroke-width="3"><rect x="560" y="170" width="150" height="90"/><rect x="820" y="230" width="90" height="70"/><rect x="250" y="540" width="110" height="80"/></g>
+  <g fill="#3f4a33"><rect x="450" y="340" width="70" height="14"/><rect x="640" y="520" width="14" height="70"/><rect x="760" y="330" width="70" height="14"/><rect x="380" y="450" width="14" height="60"/><rect x="930" y="430" width="60" height="14"/></g>
+  <rect x="60" y="340" width="90" height="120" fill="none" stroke="#4d5a3a" stroke-width="4" stroke-dasharray="10 8"/>
+  <rect x="1050" y="340" width="90" height="120" fill="none" stroke="#4d5a3a" stroke-width="4" stroke-dasharray="10 8"/>
+  <g fill="#2f3a25" font-size="26" font-weight="700"><text x="600" y="90" text-anchor="middle" font-size="34">サンプルフィールド</text>
+  <text x="635" y="225" text-anchor="middle" fill="#fff">小屋</text><text x="105" y="330" text-anchor="middle">A陣地</text><text x="1095" y="330" text-anchor="middle">B陣地</text><text x="270" y="150" text-anchor="middle">林</text></g>
+  </svg>`;
+  return new Blob([svg], { type: 'image/svg+xml' });
+}
+$('file').addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  const msg = t => { const m = $('menuMsg'); if (m) m.textContent = t; };
+  try {
+    msg('読み込み中…');
+    const url = URL.createObjectURL(f), im = new Image();
+    await new Promise((res, rej) => { im.onload = res; im.onerror = () => rej(new Error('この形式の画像は読み込めません')); im.src = url; });
+    const max = 3000, r = Math.min(1, max / Math.max(im.naturalWidth, im.naturalHeight));
+    const cv = document.createElement('canvas'); cv.width = Math.round(im.naturalWidth * r); cv.height = Math.round(im.naturalHeight * r);
+    cv.getContext('2d').drawImage(im, 0, 0, cv.width, cv.height); URL.revokeObjectURL(url);
+    const blob = await new Promise(res => cv.toBlob(res, 'image/jpeg', 0.9));
+    if (!blob) throw new Error('画像を変換できませんでした');
+    let stored = true; try { await idbSet('image', blob); } catch (err) { stored = false; }
+    S.start = null; S.flag = null; S.cal = []; S.pending = null; save(); refit();
+    await showImage(blob, false);
+    S.mode = stored ? 'view' : 'menu'; renderSheet();
+    if (!stored) msg('表示はできましたが、端末に保存できませんでした。次回開いたときに再度読み込みが必要です。');
+  } catch (err) { msg('読み込めませんでした: ' + err.message); }
+});
+
+/* ---------- GPS ---------- */
+function startGps() {
+  if (!('geolocation' in navigator)) { S.gpsErr = 'GPS 非対応'; renderStatus(); return; }
+  if (!window.isSecureContext) { S.gpsErr = 'GPS 不可(HTTPSが必要)'; renderStatus(); return; }
+  navigator.geolocation.watchPosition(p => {
+    S.pos = { lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy || 0 }; S.gpsErr = '';
+    if (S.follow) { const me = mePoint(); if (me) centerOn(me); }
+    renderStatus(); render();
+    if (S.mode === 'cal' && S.pending && document.activeElement !== $('latlon')) renderSheet();
+  }, err => {
+    S.gpsErr = err.code === 1 ? 'GPS 未許可(設定で許可)' : (S.pos ? '' : 'GPS 取得できず');
+    renderStatus();
+  }, { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
+}
+let wakeLock = null;
+async function applyWake() {
+  try {
+    if (S.wake && 'wakeLock' in navigator && document.visibilityState === 'visible') wakeLock = await navigator.wakeLock.request('screen');
+    else if (!S.wake && wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch (e) {}
+}
+document.addEventListener('visibilitychange', applyWake);
+// 操作パネルの開閉などでマップ領域の大きさが変わっても、見ている中心を保つ
+let lastSize = null;
+new ResizeObserver(() => {
+  const m = mapSize();
+  if (lastSize && S.imgW) { S.tx += (m.w - lastSize.w) / 2; S.ty += (m.h - lastSize.h) / 2; }
+  lastSize = { w: m.w, h: m.h }; render();
+}).observe(map);
+
+/* ---------- 起動 ---------- */
+(async function boot() {
+  load(); refit(); renderSheet();
+  let blob = null; try { blob = await idbGet('image'); } catch (e) {}
+  try { await showImage(blob || sampleBlob(), !blob); } catch (e) { await showImage(sampleBlob(), true); }
+  startGps(); applyWake();
+})();
+</script>
+</body>
+</html>
