@@ -75,6 +75,11 @@ header h1{font-size:15px;margin:0;font-weight:700;margin-right:auto}
   background:var(--panel);border:2px solid var(--fg);
 }
 .calpt span{position:absolute;inset:0;display:grid;place-items:center;transform:rotate(-45deg);font-size:11px;font-weight:700;color:var(--fg)}
+.peer{position:absolute}
+.peer i{position:absolute;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:var(--c);border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.35),0 1px 5px rgba(0,0,0,.5)}
+.peer b{position:absolute;left:0;bottom:12px;transform:translateX(-50%);font-size:11px;font-weight:700;color:#fff;background:var(--c);padding:1px 7px;border-radius:6px;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+.peer.stale{opacity:.45}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--c);margin-right:6px;vertical-align:middle}
 .pend{position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;border:2px solid var(--fg);border-radius:50%;background:rgba(255,255,255,.35)}
 .pend::before,.pend::after{content:"";position:absolute;background:var(--fg)}
 .pend::before{left:50%;top:-6px;bottom:-6px;width:2px;margin-left:-1px}
@@ -125,14 +130,14 @@ header h1{font-size:15px;margin:0;font-weight:700;margin-right:auto}
 .pts button{min-height:32px;padding:2px 10px;font-size:12px}
 
 nav{
-  display:grid;grid-template-columns:repeat(4,1fr);
+  display:grid;grid-template-columns:repeat(5,1fr);
   background:var(--panel);border-top:1px solid var(--line);
   padding:6px max(8px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 6px) max(8px,env(safe-area-inset-left,0px));
-  gap:6px;
+  gap:4px;
 }
 nav button{
   min-height:48px;border-radius:10px;border:1px solid transparent;background:transparent;
-  font-size:13px;font-weight:600;color:var(--muted);
+  font-size:12px;font-weight:600;color:var(--muted);padding:0 2px;white-space:nowrap;
 }
 nav button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
 </style>
@@ -142,6 +147,7 @@ nav button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
   <h1>フィールドマップ</h1>
   <span class="chip" id="calChip">位置合わせ 未設定</span>
   <span class="chip" id="gpsChip">GPS 待機中</span>
+  <span class="chip" id="shChip" hidden></span>
 </header>
 
 <div class="mapwrap">
@@ -153,6 +159,7 @@ nav button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
       <div class="mk" id="mkFlag" hidden><div class="pin flag"><b>フラッグ</b><i></i><u></u></div></div>
       <div id="calMarks"></div>
       <div class="mk" id="mkPend" hidden><div class="pend"></div></div>
+      <div id="peerMarks"></div>
       <div class="mk" id="mkMe" hidden><div class="me"></div></div>
     </div>
   </div>
@@ -170,6 +177,7 @@ nav button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
   <button type="button" data-mode="start" aria-pressed="false">スタート</button>
   <button type="button" data-mode="flag" aria-pressed="false">フラッグ</button>
   <button type="button" data-mode="cal" aria-pressed="false">位置合わせ</button>
+  <button type="button" data-mode="share" aria-pressed="false">共有</button>
   <button type="button" data-mode="menu" aria-pressed="false">設定</button>
 </nav>
 <input type="file" id="file" accept="image/*" hidden>
@@ -182,9 +190,20 @@ const LS_KEY = 'fieldmap.v1';
 // 標準マップ: サバゲーパラダイス公式フィールドマップ Ver.6.0(https://survivalgameparadise.com/facilities)。画像は再配布せず公式URLを直接参照する
 const DEFAULT_MAP = { id: 'sabapara-v6', url: 'https://survivalgameparadise.com/wp-content/uploads/2025/04/ver06_01.png', name: 'サバゲーパラダイス' };
 
+// 位置共有: Firebase Realtime Database(REST + EventSource。SDKは使わない)
+const DB_URL = 'https://fm-mr1969-default-rtdb.asia-southeast1.firebasedatabase.app';
+const SH_KEY = 'fieldmap.share.v1';
+const PEER_COLORS = ['#8e24aa', '#00897b', '#d81b60', '#6d4c41', '#37474f', '#283593'];
+const SH = {
+  name: '', room: '', id: '', on: false,       // 保存する設定(room は合言葉そのもの。端末内にだけ保存)
+  key: null, es: null, tree: {}, peers: [],    // key: 合言葉のハッシュ(DB上のルーム名)
+  status: 'off',                               // off | connecting | ok | err
+  lastSend: 0, lastPos: null, calSynced: false, skew: 0, myT: 0, retry: null,
+};
+
 const S = {
   k: 1, tx: 0, ty: 0, imgW: 0, imgH: 0,
-  mode: 'view',            // view | start | flag | cal | menu
+  mode: 'view',            // view | start | flag | cal | share | menu
   start: null, flag: null, // {x,y} 画像座標
   cal: [],                 // [{x,y,lat,lon}]
   pending: null,           // 位置合わせで選択中の画像座標
@@ -295,6 +314,9 @@ function render() {
   }
   const cm = $('calMarks'); cm.hidden = S.mode !== 'cal';
   if (!cm.hidden) [...cm.children].forEach((el, i) => place(el, S.cal[i]));
+  [...$('peerMarks').children].forEach((el, i) => {
+    const q = SH.peers[i]; place(el, S.fit && q ? geoToImg(q.lat, q.lon, S.fit) : null);
+  });
   $('btnMe').classList.toggle('on', S.follow);
 }
 function rebuildCalMarks() {
@@ -313,6 +335,7 @@ function renderStatus() {
   } else { gc.textContent = 'GPS 取得中'; gc.className = 'chip'; }
 }
 function fmt(v) { return v.toFixed(6); }
+function esc(t) { return String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function renderSheet() {
   const hint = $('hint');
   document.querySelectorAll('nav button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === S.mode)));
@@ -342,6 +365,29 @@ function renderSheet() {
         `<div><span>${i + 1}. ${fmt(c.lat)}, ${fmt(c.lon)}</span><button class="btn danger" data-act="cal-del" data-i="${i}">削除</button></div>`).join('') + `</div>`;
     }
     h += `<div class="row"><button class="btn pri" data-act="done">完了</button></div>`;
+  } else if (S.mode === 'share') {
+    if (!SH.on) {
+      h = `<h2>位置共有</h2>
+        <p>同じ合言葉を入れた人どうしで、現在地をマップに表示します。位置合わせも共有され、誰か1人が登録すれば全員に反映されます。</p>
+        <div class="row"><input class="inp" id="shName" maxlength="12" autocomplete="off" placeholder="表示名(12文字まで)" value="${esc(SH.name)}"></div>
+        <div class="row"><input class="inp" id="shRoom" maxlength="40" autocomplete="off" autocapitalize="off" placeholder="合言葉(4文字以上)" value="${esc(SH.room)}">
+        <button class="btn pri" data-act="sh-join">参加</button></div>
+        <p id="shMsg">合言葉を知っている人は全員の位置を見られます。チームごとに別の合言葉にしてください。</p>
+        <div class="row"><button class="btn" data-act="done">閉じる</button></div>`;
+    } else {
+      const st = SH.status === 'ok' ? '接続中' : SH.status === 'err' ? '切断(再接続を試行中)' : '接続しています…';
+      h = `<h2>位置共有中</h2><p>合言葉: ${esc(SH.room)} / ${st}</p>`;
+      if (!S.pos) h += `<p style="color:var(--warn)">現在地が取得できていないため、自分の位置は送信されていません。</p>`;
+      if (!S.fit) h += `<p style="color:var(--warn)">位置合わせが未設定のため、マップには表示されません。</p>`;
+      h += `<div class="pts"><div><span><span class="dot" style="--c:var(--me)"></span>${esc(SH.name)}(自分)</span></div>` + SH.peers.map(q => {
+        let info = '';
+        if (S.pos) { const l = toLocal(q.lat, q.lon, S.pos); info = Math.round(Math.hypot(l.u, l.v)) + 'm'; }
+        if (q.age > 20) info += `(${Math.round(q.age)}秒前)`;
+        return `<div><span><span class="dot" style="--c:${q.color}"></span>${esc(q.n)}</span><span>${info}</span></div>`;
+      }).join('') + `</div>`;
+      if (!SH.peers.length && SH.status === 'ok') h += `<p>ほかの参加者はまだいません。</p>`;
+      h += `<div class="row"><button class="btn danger" data-act="sh-leave">共有をやめる</button><button class="btn" data-act="done">閉じる</button></div>`;
+    }
   } else if (S.mode === 'menu') {
     h = `<h2>設定</h2>
       <div class="row"><button class="btn pri" data-act="pick">マップ画像を読み込む</button>
@@ -403,7 +449,7 @@ function onTap(cx, cy) {
 }
 function addCal(lat, lon) {
   S.cal.push({ x: S.pending.x, y: S.pending.y, lat, lon }); S.pending = null;
-  save(); refit(); renderSheet();
+  save(); refit(); shPushCal(); renderSheet();
 }
 sheet.addEventListener('click', e => {
   const b = e.target.closest('button[data-act]'); if (!b) return;
@@ -418,10 +464,12 @@ sheet.addEventListener('click', e => {
     if (t.length === 2 && t.every(isFinite) && Math.abs(t[0]) <= 90 && Math.abs(t[1]) <= 180) addCal(t[0], t[1]);
     else { $('calMsg').textContent = '読み取れませんでした。「緯度, 経度」の順に、数値を2つ入力してください。'; $('calMsg').style.color = 'var(--warn)'; }
   }
-  else if (act === 'cal-del') { S.cal.splice(+b.dataset.i, 1); save(); refit(); renderSheet(); }
-  else if (act === 'reset-cal') { S.cal = []; save(); refit(); renderSheet(); }
+  else if (act === 'cal-del') { S.cal.splice(+b.dataset.i, 1); save(); refit(); shPushCal(); renderSheet(); }
+  else if (act === 'reset-cal') { S.cal = []; save(); refit(); shPushCal(); renderSheet(); }
   else if (act === 'pick') { $('file').click(); }
   else if (act === 'default-map') { restoreDefault(); }
+  else if (act === 'sh-join') { shJoin($('shName').value, $('shRoom').value); }
+  else if (act === 'sh-leave') { shLeave(); renderSheet(); }
   else if (act === 'wake') { S.wake = !S.wake; save(); applyWake(); renderSheet(); }
 });
 document.querySelector('nav').addEventListener('click', e => { const b = e.target.closest('button[data-mode]'); if (b) setMode(b.dataset.mode); });
@@ -473,6 +521,7 @@ $('file').addEventListener('change', async e => {
     let stored = true; try { await idbSet('image', blob); } catch (err) { stored = false; }
     S.start = null; S.flag = null; S.cal = []; S.pending = null; S.mapId = 'custom'; S.noSave = false; save(); refit();
     await showImage(blob, false);
+    SH.calSynced = false; shSyncCal();
     S.mode = stored ? 'view' : 'menu'; renderSheet();
     if (!stored) msg('表示はできましたが、端末に保存できませんでした。次回開いたときに再度読み込みが必要です。');
   } catch (err) { msg('読み込めませんでした: ' + err.message); }
@@ -484,6 +533,7 @@ async function restoreDefault() {
   try { await showImage(DEFAULT_MAP.url, false); } catch (e) { msg('標準マップを読み込めませんでした。通信環境を確認してください。'); return; }
   try { await idbDel('image'); } catch (e) {}
   S.start = null; S.flag = null; S.cal = []; S.pending = null; S.mapId = DEFAULT_MAP.id; S.noSave = false; save(); refit();
+  SH.calSynced = false; shSyncCal();
   S.mode = 'view'; renderSheet();
 }
 
@@ -494,13 +544,140 @@ function startGps() {
   navigator.geolocation.watchPosition(p => {
     S.pos = { lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy || 0 }; S.gpsErr = '';
     if (S.follow) { const me = mePoint(); if (me) centerOn(me); }
-    renderStatus(); render();
+    renderStatus(); render(); shSend();
     if (S.mode === 'cal' && S.pending && document.activeElement !== $('latlon')) renderSheet();
   }, err => {
     S.gpsErr = err.code === 1 ? 'GPS 未許可(設定で許可)' : (S.pos ? '' : 'GPS 取得できず');
     renderStatus();
   }, { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
 }
+/* ---------- 位置共有 ---------- */
+// DB構造: rooms/<key>/members/<端末ID> = {n,lat,lon,acc,t} / rooms/<key>/cal = {map,pts,t,by}
+function shLoad() {
+  try { const d = JSON.parse(localStorage.getItem(SH_KEY) || '{}'); SH.name = d.name || ''; SH.room = d.room || ''; SH.id = d.id || ''; SH.on = !!d.on; } catch (e) {}
+  if (!/^[0-9a-f]{16}$/.test(SH.id)) { SH.id = hex(crypto.getRandomValues(new Uint8Array(8))); shSave(); }
+}
+function shSave() { try { localStorage.setItem(SH_KEY, JSON.stringify({ name: SH.name, room: SH.room, id: SH.id, on: SH.on })); } catch (e) {} }
+function hex(a) { return [...a].map(b => b.toString(16).padStart(2, '0')).join(''); }
+// 合言葉そのものはDBに送らず、ハッシュをルーム名にする
+async function roomKey(room) {
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('fieldmap:' + room));
+  return hex(new Uint8Array(d).slice(0, 16));
+}
+function shUrl(path) { return `${DB_URL}/rooms/${SH.key}${path}.json`; }
+// EventSource の put / patch イベントを手元のコピーに反映する
+function setPath(tree, path, data, merge) {
+  const ks = path.split('/').filter(Boolean);
+  if (!ks.length) return merge ? Object.assign(tree || {}, data || {}) : (data || {});
+  tree = (tree && typeof tree === 'object') ? tree : {};
+  let o = tree;
+  for (let i = 0; i < ks.length - 1; i++) { if (!o[ks[i]] || typeof o[ks[i]] !== 'object') o[ks[i]] = {}; o = o[ks[i]]; }
+  const k = ks[ks.length - 1];
+  if (data === null) delete o[k];
+  else if (merge && o[k] && typeof o[k] === 'object') Object.assign(o[k], data);
+  else o[k] = data;
+  return tree;
+}
+function shConnect() {
+  shDisconnect(); SH.status = 'connecting'; SH.tree = {};
+  const es = SH.es = new EventSource(shUrl(''));
+  const on = merge => e => {
+    if (SH.es !== es) return;
+    let d; try { d = JSON.parse(e.data); } catch (_) { return; }
+    if (!d || typeof d.path !== 'string') return;
+    SH.tree = setPath(SH.tree, d.path, d.data, merge); SH.status = 'ok'; shOnData();
+  };
+  es.addEventListener('put', on(false)); es.addEventListener('patch', on(true));
+  es.onerror = () => {
+    if (SH.es !== es) return;
+    SH.status = 'err';
+    if (es.readyState === 2) { clearTimeout(SH.retry); SH.retry = setTimeout(() => { if (SH.on && SH.es === es) shConnect(); }, 10000); }
+    shUi();
+  };
+}
+function shDisconnect() { if (SH.es) { SH.es.close(); SH.es = null; } clearTimeout(SH.retry); }
+async function shJoin(name, room) {
+  name = (name || '').trim().slice(0, 12); room = (room || '').normalize('NFKC').trim();
+  const msg = t => { const m = $('shMsg'); if (m) { m.textContent = t; m.style.color = 'var(--warn)'; } };
+  if (!name) return msg('表示名を入力してください。');
+  if (room.length < 4) return msg('合言葉は4文字以上にしてください。');
+  if (!window.isSecureContext || !crypto.subtle) return msg('この環境では共有を使えません(HTTPSが必要)。');
+  SH.name = name; SH.room = room; SH.on = true; shSave();
+  SH.key = await roomKey(room); SH.calSynced = false; SH.lastSend = 0; SH.peers = [];
+  shConnect(); shSend(true); shUi(); if (S.mode === 'share') renderSheet();
+}
+function shLeave() {
+  const url = SH.key ? shUrl('/members/' + SH.id) : null;
+  shDisconnect(); SH.on = false; SH.status = 'off'; SH.tree = {}; SH.key = null; shSave();
+  if (url) fetch(url, { method: 'DELETE', keepalive: true }).catch(() => {});
+  shPeers(); shUi(); render();
+}
+// 自分の位置を送る。3秒に1回まで。動いていなければ15秒に1回(生存確認)
+function shSend(force) {
+  if (!SH.on || !SH.key || !S.pos) return;
+  const now = Date.now(); let moved = true;
+  if (SH.lastPos) { const l = toLocal(S.pos.lat, S.pos.lon, SH.lastPos); moved = Math.hypot(l.u, l.v) > 1.5; }
+  if (!force && (now - SH.lastSend < 3000 || (!moved && now - SH.lastSend < 15000))) return;
+  SH.lastSend = now; SH.lastPos = { lat: S.pos.lat, lon: S.pos.lon };
+  fetch(shUrl('/members/' + SH.id), { method: 'PUT', body: JSON.stringify({
+    n: SH.name, lat: +S.pos.lat.toFixed(6), lon: +S.pos.lon.toFixed(6), acc: Math.round(S.pos.acc), t: { '.sv': 'timestamp' },
+  }) }).catch(() => {});
+}
+// 表示する仲間の一覧を作り直す。2分以上更新のない人は出さない
+function shPeers() {
+  const ms = (SH.on && SH.tree && SH.tree.members) || {}, now = Date.now() + SH.skew;
+  SH.peers = Object.keys(ms).filter(id => id !== SH.id && ms[id] && typeof ms[id].lat === 'number' && typeof ms[id].lon === 'number')
+    .map(id => ({ id, n: String(ms[id].n || '?'), lat: ms[id].lat, lon: ms[id].lon, age: Math.max(0, (now - (ms[id].t || 0)) / 1000),
+      color: PEER_COLORS[[...id].reduce((a, ch) => a + ch.charCodeAt(0), 0) % PEER_COLORS.length] }))
+    .filter(q => q.age < 120).sort((a, b) => a.n.localeCompare(b.n, 'ja') || a.id.localeCompare(b.id));
+  $('peerMarks').innerHTML = SH.peers.map(q =>
+    `<div class="mk"><div class="peer${q.age > 45 ? ' stale' : ''}" style="--c:${q.color}"><b>${esc(q.n)}</b><i></i></div></div>`).join('');
+}
+function shOnData() {
+  const me = SH.tree.members && SH.tree.members[SH.id];
+  if (me && me.t && me.t !== SH.myT) { // 自分の書き込みの戻りで、サーバーとの時計のずれを見積もる
+    SH.myT = me.t; const k = me.t - Date.now(); SH.skew = Math.abs(k) < 300000 ? k : 0;
+  }
+  shSyncCal(); shPeers(); render(); shUi();
+}
+/* 位置合わせの共有。同じマップ画像(種類と画素数が一致)のときだけ反映する */
+function calSig() { return `${S.mapId}:${S.imgW}x${S.imgH}`; }
+function calNorm(c) { return [+(+c.x).toFixed(1), +(+c.y).toFixed(1), c.lat, c.lon]; }
+function shPushCal() {
+  if (!SH.on || !SH.key || S.noSave || !S.imgW) return;
+  const b = { map: calSig(), t: { '.sv': 'timestamp' }, by: SH.name };
+  if (S.cal.length) b.pts = S.cal.map(c => { const n = calNorm(c); return { x: n[0], y: n[1], lat: n[2], lon: n[3] }; });
+  fetch(shUrl('/cal'), { method: 'PUT', body: JSON.stringify(b) }).catch(() => {});
+}
+function shSyncCal() {
+  if (!SH.on || SH.status !== 'ok' || !S.imgW || S.noSave) return;
+  const c = SH.tree.cal, first = !SH.calSynced; SH.calSynced = true;
+  const same = c && c.map === calSig();
+  const pts = same ? (Array.isArray(c.pts) ? c.pts : Object.values(c.pts || {}))
+    .filter(q => q && [q.x, q.y, q.lat, q.lon].every(v => typeof v === 'number' && isFinite(v))) : null;
+  // 参加直後は「ルームに登録済みならそれを採用、なければ自分のものを共有」。以後はルームの内容に合わせる
+  if (pts && (pts.length || !first)) {
+    if (JSON.stringify(pts.map(calNorm)) !== JSON.stringify(S.cal.map(calNorm))) {
+      S.cal = pts.map(q => ({ x: q.x, y: q.y, lat: q.lat, lon: q.lon })); save(); refit();
+      if (S.mode === 'cal') renderSheet();
+    }
+  } else if (first && S.cal.length && (!c || same)) shPushCal();
+}
+function shUi() {
+  const ch = $('shChip'); ch.hidden = !SH.on;
+  if (SH.on) {
+    ch.textContent = SH.status === 'ok' ? `共有 ${SH.peers.length + 1}人` : SH.status === 'err' ? '共有 切断' : '共有 接続中';
+    ch.className = 'chip' + (SH.status === 'ok' ? ' ok' : SH.status === 'err' ? ' ng' : '');
+  }
+  if (S.mode === 'share' && SH.on) renderSheet();
+}
+setInterval(() => { if (SH.on) { shSend(); shPeers(); render(); shUi(); } }, 5000);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !SH.on || !SH.key) return;
+  if (!SH.es || SH.es.readyState === 2) shConnect();
+  shSend(true);
+});
+
 let wakeLock = null;
 async function applyWake() {
   try {
@@ -529,6 +706,7 @@ new ResizeObserver(() => {
   if (!legacyCustom && S.savedMap !== S.mapId) { S.start = null; S.flag = null; S.cal = []; }
   save(); refit(); renderSheet();
   startGps(); applyWake();
+  shLoad(); if (SH.on && SH.name && SH.room) shJoin(SH.name, SH.room);
 })();
 </script>
 </body>
