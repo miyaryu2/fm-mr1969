@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>フィールドマップの使い方</title>
+<style>
+:root{
+  --bg:#f3f4ef; --panel:#ffffff; --fg:#1c211b; --muted:#5d665b; --line:#d5d9cf;
+  --accent:#2f6b3c; --on-accent:#ffffff; --me:#1565d8; --warn:#b3261e; --note:#fff6dd; --note-line:#e3c97a;
+  --font:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#141813; --panel:#1e241d; --fg:#e8ece4; --muted:#9aa596; --line:#343c32;
+    --accent:#7fc48a; --on-accent:#10210f; --me:#5aa2ff; --warn:#ff8a80; --note:#2c2a1c; --note-line:#6b5f2e;
+    color-scheme:dark;
+  }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 var(--font)}
+.wrap{
+  max-width:720px;margin:0 auto;
+  padding:calc(env(safe-area-inset-top,0px) + 20px) max(16px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 40px) max(16px,env(safe-area-inset-left,0px));
+}
+h1{font-size:24px;line-height:1.35;margin:0 0 4px}
+.lead{color:var(--muted);margin:0 0 16px}
+h2{font-size:19px;line-height:1.4;margin:36px 0 10px;padding-top:14px;border-top:1px solid var(--line)}
+h3{font-size:16px;margin:22px 0 6px}
+p{margin:0 0 12px}
+ol,ul{margin:0 0 12px;padding-left:1.5em}
+li{margin:0 0 6px}
+a{color:var(--accent)}
+b.ui{
+  font-weight:600;white-space:nowrap;background:var(--panel);border:1px solid var(--line);
+  border-radius:6px;padding:1px 7px;font-size:.92em;
+}
+.back{
+  display:inline-block;margin:0 0 20px;padding:10px 16px;border-radius:10px;text-decoration:none;font-weight:600;
+  background:var(--accent);color:var(--on-accent);
+}
+.toc{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px 12px 2.4em;margin:0}
+.toc li{margin:2px 0}
+.note{background:var(--note);border:1px solid var(--note-line);border-radius:10px;padding:10px 14px;margin:0 0 12px}
+.note p:last-child{margin-bottom:0}
+.tablewrap{overflow-x:auto;margin:0 0 12px}
+table{border-collapse:collapse;width:100%;font-size:15px;background:var(--panel)}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:var(--bg);white-space:nowrap}
+
+/* 画面の見方の図 */
+.screen{
+  max-width:320px;margin:4px auto 14px;border:2px solid var(--fg);border-radius:22px;overflow:hidden;
+  background:var(--panel);font-size:12px;line-height:1.3;
+}
+.s-head{display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--line)}
+.s-head strong{margin-right:auto;font-size:13px}
+.s-chip{border:1px solid var(--accent);color:var(--accent);border-radius:999px;padding:1px 7px;font-size:10px;white-space:nowrap}
+.s-map{position:relative;height:210px;background:linear-gradient(135deg,#b7c79a,#8fa372)}
+.s-dot{position:absolute;width:14px;height:14px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.4)}
+.s-name{position:absolute;color:#fff;font-size:10px;font-weight:700;padding:0 5px;border-radius:5px}
+.s-fab{
+  position:absolute;right:8px;width:36px;height:36px;border-radius:50%;background:var(--panel);border:1px solid var(--line);
+  display:grid;place-items:center;font-size:9px;font-weight:700;color:var(--fg);
+}
+.s-nav{display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--line);padding:6px 4px;text-align:center;font-size:10px;font-weight:600;color:var(--muted)}
+.s-num{
+  position:absolute;width:20px;height:20px;border-radius:50%;background:var(--fg);color:var(--bg);
+  display:grid;place-items:center;font-size:11px;font-weight:700;
+}
+.screenbox{position:relative}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>フィールドマップの使い方</h1>
+<p class="lead">サバゲーフィールドのマップ上に、自分と仲間の現在地を表示するアプリです。</p>
+<a class="back" href="./">アプリを開く</a>
+
+<ol class="toc">
+  <li><a href="#about">できること</a></li>
+  <li><a href="#prepare">最初の準備</a></li>
+  <li><a href="#screen">画面の見方</a></li>
+  <li><a href="#share">仲間と位置を共有する</a></li>
+  <li><a href="#cal">位置合わせをする</a></li>
+  <li><a href="#pins">スタートとフラッグの位置を記録する</a></li>
+  <li><a href="#map">ほかのフィールドで使う</a></li>
+  <li><a href="#caution">使うときの注意</a></li>
+  <li><a href="#trouble">うまくいかないとき</a></li>
+</ol>
+
+<h2 id="about">1. できること</h2>
+<ul>
+  <li>サバゲーパラダイスのフィールドマップを、拡大・縮小しながら見る</li>
+  <li>自分の現在地をマップ上に青い丸で表示する</li>
+  <li>同じ合言葉を入れた仲間の現在地を、名前付きの丸で表示する</li>
+  <li>スタート地点とフラッグの位置にピンを立てる</li>
+</ul>
+<p>スマホのブラウザで開くだけで使えます。アプリのインストールやアカウント登録は不要で、無料です。</p>
+
+<h2 id="prepare">2. 最初の準備</h2>
+<p>フィールドに着く前、電波のある場所で済ませておくと安心です。</p>
+<ol>
+  <li>iPhone は Safari、Android は Chrome でアプリを開く。</li>
+  <li>「位置情報の利用を許可しますか」と聞かれたら、<b class="ui">許可</b> を選ぶ。</li>
+  <li>画面下の <b class="ui">設定</b> を押し、<b class="ui">画面を消灯しない</b> を <b class="ui">オン</b> にする。</li>
+  <li>マップ(サバゲーパラダイスの航空写真)が表示されていることを確認する。</li>
+</ol>
+<div class="note">
+  <p><strong>ホーム画面に追加しておくと便利です。</strong> iPhone は Safari の共有ボタンから「ホーム画面に追加」、Android は Chrome のメニューから「ホーム画面に追加」を選びます。</p>
+</div>
+
+<h2 id="screen">3. 画面の見方</h2>
+<div class="screenbox">
+  <div class="screen" role="img" aria-label="アプリ画面の模式図。上に状態表示、中央にマップ、右下に現在地と全体のボタン、下に5つのタブがある">
+    <div class="s-head">
+      <strong>フィールドマップ</strong>
+      <span class="s-chip">位置合わせ 3点</span>
+      <span class="s-chip">GPS ±6m</span>
+      <span class="s-chip">共有 3人</span>
+    </div>
+    <div class="s-map">
+      <span class="s-num" style="left:8px;top:8px">1</span>
+      <span class="s-dot" style="left:120px;top:110px;background:#1565d8"></span>
+      <span class="s-num" style="left:140px;top:104px">2</span>
+      <span class="s-name" style="left:38px;top:42px;background:#8e24aa">たろう</span>
+      <span class="s-dot" style="left:52px;top:60px;background:#8e24aa"></span>
+      <span class="s-name" style="left:186px;top:150px;background:#00897b">はなこ</span>
+      <span class="s-dot" style="left:200px;top:168px;background:#00897b"></span>
+      <span class="s-num" style="left:76px;top:56px">3</span>
+      <span class="s-fab" style="bottom:50px">現在地</span>
+      <span class="s-fab" style="bottom:8px">全体</span>
+      <span class="s-num" style="right:50px;bottom:36px">4</span>
+    </div>
+    <div class="s-nav"><span>スタート</span><span>フラッグ</span><span>位置合わせ</span><span>共有</span><span>設定</span></div>
+  </div>
+</div>
+<div class="tablewrap">
+<table>
+  <tr><th>番号</th><th>名前</th><th>説明</th></tr>
+  <tr><td>1</td><td>状態表示</td><td>位置合わせの点数、GPS の誤差、共有中の人数が出ます。緑なら正常、赤は問題ありです。</td></tr>
+  <tr><td>2</td><td>青い丸</td><td>自分の現在地です。周りの薄い円は誤差の範囲です。</td></tr>
+  <tr><td>3</td><td>色付きの丸</td><td>仲間の現在地です。名前が付きます。しばらく更新がない人は薄くなります。</td></tr>
+  <tr><td>4</td><td>現在地/全体</td><td><b class="ui">現在地</b> は自分を画面の中央に表示し続けます。<b class="ui">全体</b> はマップ全体を表示します。</td></tr>
+</table>
+</div>
+<p>マップは指1本で移動、指2本で拡大・縮小できます。画面下の5つのタブは、もう一度押すと閉じます。</p>
+
+<h2 id="share">4. 仲間と位置を共有する</h2>
+<p>チーム全員が同じ合言葉を入れると、お互いの現在地が見えるようになります。</p>
+<ol>
+  <li>事前に、チームで合言葉を1つ決める(4文字以上)。</li>
+  <li>画面下の <b class="ui">共有</b> を押す。</li>
+  <li><b class="ui">表示名</b> に自分の名前(12文字まで)、<b class="ui">合言葉</b> に決めた言葉を入れる。</li>
+  <li><b class="ui">参加</b> を押す。</li>
+  <li>画面上に <b class="ui">共有 ○人</b> と緑で出れば成功。共有の画面には、仲間の名前と自分からの距離が並ぶ。</li>
+</ol>
+<ul>
+  <li>一度参加すると、次にアプリを開いたときも自動で参加します。</li>
+  <li>やめるときは <b class="ui">共有</b> を開いて <b class="ui">共有をやめる</b> を押します。</li>
+  <li>仲間がマップ上に表示されるには、位置合わせ(次の章)が済んでいる必要があります。</li>
+</ul>
+<div class="note">
+  <p><strong>合言葉は相手チームに知られないようにしてください。</strong> 合言葉を知っている人は、全員の位置を見ることができます。</p>
+</div>
+
+<h2 id="cal">5. 位置合わせをする</h2>
+<p>位置合わせは、マップと実際の場所を対応づける作業です。これをしないと、現在地がマップに表示されません。</p>
+<p><strong>共有に参加していれば、チームの誰か1人がやるだけで全員に反映されます。</strong> 担当を1人決めて、ゲーム前に済ませてください。</p>
+<ol>
+  <li>先に <b class="ui">共有</b> に参加しておく。</li>
+  <li>フィールド内の、マップ上で場所がはっきり分かる目印(建物の角、入口など)まで歩く。</li>
+  <li>画面下の <b class="ui">位置合わせ</b> を押し、マップ上でその目印をタップする(十字の印が付く)。</li>
+  <li>その場に数秒立ち止まり、<b class="ui">いま立っている場所として登録</b> を押す。</li>
+  <li>離れた別の目印に移動して、手順 3〜4 を繰り返す。合計3か所で行う。</li>
+  <li>画面上に <b class="ui">位置合わせ 3点</b> と緑で出て、青い丸が自分のいる場所に表示されれば完了。<b class="ui">完了</b> を押して閉じる。</li>
+</ol>
+<h3>正確に合わせるコツ</h3>
+<ul>
+  <li>3か所は、マップの端どうしで大きな三角形になるように選ぶ。近い場所や一直線上は避ける。</li>
+  <li>木の下や建物の中を避け、空が開けた場所で登録する。</li>
+  <li>画面上の <b class="ui">GPS ±○m</b> の数字が 10 以下のときに登録する。</li>
+  <li>ずれてしまった点は、位置合わせの一覧にある <b class="ui">削除</b> で消して登録し直す。</li>
+</ul>
+
+<h2 id="pins">6. スタートとフラッグの位置を記録する</h2>
+<ol>
+  <li>画面下の <b class="ui">スタート</b>(または <b class="ui">フラッグ</b>)を押す。</li>
+  <li>マップ上で、その場所をタップするとピンが立つ。タップし直すと移動する。</li>
+  <li><b class="ui">完了</b> を押す。</li>
+</ol>
+<p>ピンは自分のスマホにだけ表示され、仲間には共有されません。消すときは同じタブを開いて <b class="ui">スタートを消す</b>(<b class="ui">フラッグを消す</b>)を押します。</p>
+
+<h2 id="map">7. ほかのフィールドで使う</h2>
+<p>サバゲーパラダイス以外のフィールドでも、マップの画像があれば使えます。</p>
+<ol>
+  <li>フィールドのマップ画像をスマホに保存する(公式サイトの画像や、配られたマップを真上から撮った写真)。</li>
+  <li><b class="ui">設定</b> を押し、<b class="ui">マップ画像を読み込む</b> から画像を選ぶ。</li>
+  <li>そのフィールドで、位置合わせを最初からやり直す。</li>
+</ol>
+<ul>
+  <li>画像を読み込むと、それまでのスタート・フラッグ・位置合わせは消えます。</li>
+  <li>位置合わせを仲間と共有するには、全員が同じ画像ファイルを読み込む必要があります。</li>
+  <li>サバゲーパラダイスのマップに戻すには、<b class="ui">設定</b> の <b class="ui">標準マップ(サバゲーパラダイス)に戻す</b> を押します。</li>
+</ul>
+
+<h2 id="caution">8. 使うときの注意</h2>
+<ul>
+  <li><strong>位置には誤差があります。</strong> 数m〜十数mずれることがあり、木の多い場所ではさらにずれます。「マップのどのマスにいるか」の目安として使ってください。</li>
+  <li><strong>画面をつけたままにしてください。</strong> 画面が消えたり、別のアプリに切り替えたりすると、自分の位置が送られなくなり、2分ほどで仲間の画面から消えます。</li>
+  <li><strong>電波が必要です。</strong> 圏外ではマップの表示も位置の共有もできません。</li>
+  <li><strong>バッテリーの減りが早くなります。</strong> GPS と画面を使い続けるためです。モバイルバッテリーがあると安心です。</li>
+  <li><strong>フィールドのルールを守ってください。</strong> ゲーム中のスマホ使用や位置共有が認められているか、事前に確認してください。</li>
+</ul>
+
+<h2 id="trouble">9. うまくいかないとき</h2>
+<div class="tablewrap">
+<table>
+  <tr><th>症状</th><th>対処</th></tr>
+  <tr><td>画面上に「GPS 未許可」と赤く出る</td><td>位置情報が許可されていません。iPhone は「設定」→「プライバシーとセキュリティ」→「位置情報サービス」→「Safari の Web サイト」で「このAppの使用中」を選び、「正確な位置情報」をオンにします。Android は Chrome のアドレスバー左のアイコンから位置情報を許可します。その後、アプリを再読み込みします。</td></tr>
+  <tr><td>青い丸(自分)が表示されない</td><td>画面上が「位置合わせ 未設定」なら、位置合わせがまだです。5章の手順を行うか、共有に参加して担当者の登録を待ちます。</td></tr>
+  <tr><td>青い丸が実際の場所とずれている</td><td>空が開けた場所に出て、GPS の数字が小さくなるのを待ちます。直らなければ、位置合わせの点を削除して登録し直します。</td></tr>
+  <tr><td>仲間が表示されない</td><td>合言葉が全員同じか(全角・半角、大文字・小文字も)確認します。相手の画面が消えていないか、圏外でないかも確認します。</td></tr>
+  <tr><td>「共有 切断」と赤く出る</td><td>電波が弱い状態です。電波が戻ると自動でつながり直します。</td></tr>
+  <tr><td>「GPS ±○m・マップ範囲外」と出る</td><td>フィールドの外にいるか、位置合わせが大きくずれています。フィールド内でも出る場合は、位置合わせをやり直します。</td></tr>
+  <tr><td>サバゲーパラダイスのマップではなくサンプルが表示される</td><td>マップ画像を取得できていません。電波のある場所でアプリを再読み込みします。</td></tr>
+  <tr><td>「共有」のタブがない、表示が古い</td><td>古い版が表示されています。ページを再読み込みします。ホーム画面から開いている場合は、一度アプリを終了して開き直します。</td></tr>
+</table>
+</div>
+
+<p style="margin-top:28px"><a class="back" href="./">アプリを開く</a></p>
+
+</div>
+</body>
+</html>
