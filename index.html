@@ -157,7 +157,7 @@ nav button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
     </div>
   </div>
   <div class="hint" id="hint" hidden></div>
-  <div class="sample" id="sampleTag" hidden>サンプルマップ表示中(設定から画像を読み込み)</div>
+  <div class="sample" id="sampleTag" hidden>標準マップを読み込めず、サンプルを表示中(再読み込みしてください)</div>
   <div class="fabs">
     <button class="fab" id="btnMe" type="button" aria-label="現在地を中央に表示">現在地</button>
     <button class="fab" id="btnFit" type="button" aria-label="マップ全体を表示">全体</button>
@@ -179,6 +179,8 @@ nav button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
 const $ = id => document.getElementById(id);
 const map = $('map'), stage = $('stage'), img = $('img'), sheet = $('sheet');
 const LS_KEY = 'fieldmap.v1';
+// 標準マップ: サバゲーパラダイス公式フィールドマップ Ver.6.0(https://survivalgameparadise.com/facilities)。画像は再配布せず公式URLを直接参照する
+const DEFAULT_MAP = { id: 'sabapara-v6', url: 'https://survivalgameparadise.com/wp-content/uploads/2025/04/ver06_01.png', name: 'サバゲーパラダイス' };
 
 const S = {
   k: 1, tx: 0, ty: 0, imgW: 0, imgH: 0,
@@ -188,16 +190,18 @@ const S = {
   pending: null,           // 位置合わせで選択中の画像座標
   pos: null,               // {lat,lon,acc}
   gpsErr: '', fit: null, follow: false, sample: false, wake: false,
+  mapId: '', savedMap: undefined, noSave: false, // mapId: 'custom' | DEFAULT_MAP.id | 'sample'
 };
 
 /* ---------- 保存 ---------- */
 function save() {
-  try { localStorage.setItem(LS_KEY, JSON.stringify({ start: S.start, flag: S.flag, cal: S.cal, wake: S.wake })); } catch (e) {}
+  if (S.noSave) return;
+  try { localStorage.setItem(LS_KEY, JSON.stringify({ start: S.start, flag: S.flag, cal: S.cal, wake: S.wake, map: S.mapId })); } catch (e) {}
 }
 function load() {
   try {
     const d = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
-    S.start = d.start || null; S.flag = d.flag || null; S.cal = Array.isArray(d.cal) ? d.cal : []; S.wake = !!d.wake;
+    S.start = d.start || null; S.flag = d.flag || null; S.cal = Array.isArray(d.cal) ? d.cal : []; S.wake = !!d.wake; S.savedMap = d.map;
   } catch (e) {}
 }
 function idb() {
@@ -210,6 +214,10 @@ function idb() {
 async function idbGet(key) {
   const db = await idb();
   return new Promise((res, rej) => { const q = db.transaction('kv').objectStore('kv').get(key); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+}
+async function idbDel(key) {
+  const db = await idb();
+  return new Promise((res, rej) => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').delete(key); t.oncomplete = () => res(); t.onerror = () => rej(t.error); });
 }
 async function idbSet(key, val) {
   const db = await idb();
@@ -338,7 +346,8 @@ function renderSheet() {
     h = `<h2>設定</h2>
       <div class="row"><button class="btn pri" data-act="pick">マップ画像を読み込む</button>
       <button class="btn" data-act="wake">画面を消灯しない: ${S.wake ? 'オン' : 'オフ'}</button></div>
-      <p>画像を読み込むと、スタート・フラッグ・位置合わせは新しいマップ用にリセットされます。画像と位置データはこの端末内にだけ保存されます。</p>
+      <p>標準マップは${DEFAULT_MAP.name}です。別の画像を読み込むと、スタート・フラッグ・位置合わせは新しいマップ用にリセットされます。画像と位置データはこの端末内にだけ保存されます。</p>
+      ${S.mapId === 'custom' ? `<div class="row"><button class="btn" data-act="default-map">標準マップ(${DEFAULT_MAP.name})に戻す</button></div>` : ''}
       <div class="row"><button class="btn danger" data-act="reset-cal" ${S.cal.length ? '' : 'disabled'}>位置合わせをすべて消す</button>
       <button class="btn" data-act="done">閉じる</button></div>
       <p id="menuMsg"></p>`;
@@ -412,6 +421,7 @@ sheet.addEventListener('click', e => {
   else if (act === 'cal-del') { S.cal.splice(+b.dataset.i, 1); save(); refit(); renderSheet(); }
   else if (act === 'reset-cal') { S.cal = []; save(); refit(); renderSheet(); }
   else if (act === 'pick') { $('file').click(); }
+  else if (act === 'default-map') { restoreDefault(); }
   else if (act === 'wake') { S.wake = !S.wake; save(); applyWake(); renderSheet(); }
 });
 document.querySelector('nav').addEventListener('click', e => { const b = e.target.closest('button[data-mode]'); if (b) setMode(b.dataset.mode); });
@@ -424,11 +434,12 @@ $('btnMe').addEventListener('click', () => {
 function centerOn(p) { const m = mapSize(); S.tx = m.w / 2 - p.x * S.k; S.ty = m.h / 2 - p.y * S.k; }
 
 /* ---------- マップ画像 ---------- */
-function showImage(blob, sample) {
+let objUrl = null;
+function showImage(src, sample) { // src: Blob または URL文字列
   return new Promise((res, rej) => {
-    const url = URL.createObjectURL(blob);
-    img.onload = () => { S.imgW = img.naturalWidth; S.imgH = img.naturalHeight; S.sample = sample; $('sampleTag').hidden = !sample; fitView(); res(); };
-    img.onerror = () => rej(new Error('画像を表示できません'));
+    const isBlob = typeof src !== 'string', url = isBlob ? URL.createObjectURL(src) : src, old = objUrl;
+    img.onload = () => { if (old) URL.revokeObjectURL(old); objUrl = isBlob ? url : null; S.imgW = img.naturalWidth; S.imgH = img.naturalHeight; S.sample = sample; $('sampleTag').hidden = !sample; fitView(); res(); };
+    img.onerror = () => { if (isBlob) URL.revokeObjectURL(url); rej(new Error('画像を表示できません')); };
     img.src = url;
   });
 }
@@ -460,12 +471,21 @@ $('file').addEventListener('change', async e => {
     const blob = await new Promise(res => cv.toBlob(res, 'image/jpeg', 0.9));
     if (!blob) throw new Error('画像を変換できませんでした');
     let stored = true; try { await idbSet('image', blob); } catch (err) { stored = false; }
-    S.start = null; S.flag = null; S.cal = []; S.pending = null; save(); refit();
+    S.start = null; S.flag = null; S.cal = []; S.pending = null; S.mapId = 'custom'; S.noSave = false; save(); refit();
     await showImage(blob, false);
     S.mode = stored ? 'view' : 'menu'; renderSheet();
     if (!stored) msg('表示はできましたが、端末に保存できませんでした。次回開いたときに再度読み込みが必要です。');
   } catch (err) { msg('読み込めませんでした: ' + err.message); }
 });
+
+async function restoreDefault() {
+  if (!confirm('読み込んだ画像と、スタート・フラッグ・位置合わせを消して標準マップに戻します。よろしいですか?')) return;
+  const msg = t => { const m = $('menuMsg'); if (m) m.textContent = t; };
+  try { await showImage(DEFAULT_MAP.url, false); } catch (e) { msg('標準マップを読み込めませんでした。通信環境を確認してください。'); return; }
+  try { await idbDel('image'); } catch (e) {}
+  S.start = null; S.flag = null; S.cal = []; S.pending = null; S.mapId = DEFAULT_MAP.id; S.noSave = false; save(); refit();
+  S.mode = 'view'; renderSheet();
+}
 
 /* ---------- GPS ---------- */
 function startGps() {
@@ -501,7 +521,13 @@ new ResizeObserver(() => {
 (async function boot() {
   load(); refit(); renderSheet();
   let blob = null; try { blob = await idbGet('image'); } catch (e) {}
-  try { await showImage(blob || sampleBlob(), !blob); } catch (e) { await showImage(sampleBlob(), true); }
+  S.mapId = blob ? 'custom' : DEFAULT_MAP.id;
+  try { await showImage(blob || DEFAULT_MAP.url, false); }
+  catch (e) { S.mapId = 'sample'; S.noSave = true; await showImage(sampleBlob(), true); } // 一時的な読み込み失敗で保存データを消さない
+  // 保存済みのピン・位置合わせが別のマップ用なら使わない(旧版で画像を読み込んでいた場合はそのまま引き継ぐ)
+  const legacyCustom = blob && S.savedMap === undefined;
+  if (!legacyCustom && S.savedMap !== S.mapId) { S.start = null; S.flag = null; S.cal = []; }
+  save(); refit(); renderSheet();
   startGps(); applyWake();
 })();
 </script>
