@@ -38,6 +38,7 @@ b.ui{
 }
 .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:0 0 14px}
 .card .who{color:var(--muted);font-size:14px;margin:0 0 8px}
+.guide{display:block;width:100%;max-width:300px;aspect-ratio:9/16;margin:0 auto;border-radius:10px;border:1px solid var(--line);background:#1f4a2a}
 .note{background:var(--note);border:1px solid var(--note-line);border-radius:12px;padding:14px 16px;margin:0 0 14px}
 .links{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
 .btn{
@@ -51,6 +52,12 @@ b.ui{
 <div class="wrap">
 
 <h1>フィールドマップ かんたんガイド</h1>
+
+<div class="card">
+  <h2>動画で見る(約1分)</h2>
+  <video class="guide" controls playsinline preload="none" poster="guide-poster.jpg" src="guide.mp4"></video>
+  <p class="who" style="margin:8px 0 0">音声はありません。サンプルのマップで撮影しています。</p>
+</div>
 
 <div class="card">
   <h2>全員がやること</h2>
