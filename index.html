@@ -210,7 +210,7 @@ const S = {
   cal: [],                 // [{x,y,lat,lon}]
   pending: null,           // 位置合わせで選択中の画像座標
   pos: null,               // {lat,lon,acc}
-  gpsErr: '', fit: null, follow: false, sample: false, wake: false,
+  gpsErr: '', fit: null, follow: false, sample: false, wake: false, offline: false, // offline: 圏外でも表示できる状態か
   mapId: '', savedMap: undefined, noSave: false, // mapId: 'custom' | DEFAULT_MAP.id | 'sample'
 };
 
@@ -398,6 +398,7 @@ function renderSheet() {
       ${S.mapId === 'custom' ? `<div class="row"><button class="btn" data-act="default-map">標準マップ(${DEFAULT_MAP.name})に戻す</button></div>` : ''}
       <div class="row"><button class="btn danger" data-act="reset-cal" ${S.cal.length ? '' : 'disabled'}>位置合わせをすべて消す</button>
       <button class="btn" data-act="done">閉じる</button></div>
+      <p>電波がない場所での表示: ${S.offline ? '準備済み' : '未準備(電波のある場所で一度開き直してください)'}</p>
       <p><a href="manual.html" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">使い方(マニュアル)を開く</a></p>
       <p id="menuMsg"></p>`;
   }
@@ -535,6 +536,7 @@ async function restoreDefault() {
   const msg = t => { const m = $('menuMsg'); if (m) m.textContent = t; };
   try { await showImage(DEFAULT_MAP.url, false); } catch (e) { msg('標準マップを読み込めませんでした。通信環境を確認してください。'); return; }
   try { await idbDel('image'); } catch (e) {}
+  swPost({ type: 'map-ok', url: DEFAULT_MAP.url });
   S.start = null; S.flag = null; S.cal = []; S.pending = null; S.mapId = DEFAULT_MAP.id; S.noSave = false; save(); refit();
   SH.calSynced = false; shSyncCal();
   S.mode = 'view'; renderSheet();
@@ -624,7 +626,8 @@ function shSend(force) {
   SH.lastSend = now; SH.lastPos = { lat: S.pos.lat, lon: S.pos.lon };
   fetch(shUrl('/members/' + SH.id), { method: 'PUT', body: JSON.stringify({
     n: SH.name, lat: +S.pos.lat.toFixed(6), lon: +S.pos.lon.toFixed(6), acc: Math.round(S.pos.acc), t: { '.sv': 'timestamp' },
-  }) }).catch(() => {});
+  }) }).then(r => { if (!r.ok) throw new Error('send'); })
+    .catch(() => { SH.lastPos = null; }); // 送れなかったときは、停止中でも15秒待たず3秒後に送り直す
 }
 // 表示する仲間の一覧を作り直す。2分以上更新のない人は出さない
 function shPeers() {
@@ -675,11 +678,13 @@ function shUi() {
   if (S.mode === 'share' && SH.on) renderSheet();
 }
 setInterval(() => { if (SH.on) { shSend(); shPeers(); render(); shUi(); } }, 5000);
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible' || !SH.on || !SH.key) return;
+function shResume() {
+  if (!SH.on || !SH.key) return;
   if (!SH.es || SH.es.readyState === 2) shConnect();
   shSend(true);
-});
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') shResume(); });
+window.addEventListener('online', shResume); // 電波が戻ったら、すぐにつなぎ直して自分の位置を送る
 
 let wakeLock = null;
 async function applyWake() {
@@ -697,13 +702,31 @@ new ResizeObserver(() => {
   lastSize = { w: m.w, h: m.h }; render();
 }).observe(map);
 
+/* ---------- 電波が弱い場所への対応(sw.js がアプリ本体とマップ画像を端末に保存する) ---------- */
+let swReady = null;
+function swPost(m) { if (swReady) swReady.then(r => { if (r.active) r.active.postMessage(m); }).catch(() => {}); }
+function setOffline(ok) { S.offline = ok; if (S.mode === 'menu') renderSheet(); }
+if ('serviceWorker' in navigator) {
+  swReady = navigator.serviceWorker.register('sw.js').then(() => navigator.serviceWorker.ready);
+  swReady.catch(() => {});
+  navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.type === 'map-saved') setOffline(!!e.data.ok); });
+}
+
 /* ---------- 起動 ---------- */
 (async function boot() {
   load(); refit(); renderSheet();
   let blob = null; try { blob = await idbGet('image'); } catch (e) {}
   S.mapId = blob ? 'custom' : DEFAULT_MAP.id;
-  try { await showImage(blob || DEFAULT_MAP.url, false); }
-  catch (e) { S.mapId = 'sample'; S.noSave = true; await showImage(sampleBlob(), true); } // 一時的な読み込み失敗で保存データを消さない
+  try {
+    await showImage(blob || DEFAULT_MAP.url, false);
+    // 表示できた画像だけを保存対象にする。読み込んだ画像は端末内(IndexedDB)に保存済み
+    if (blob) { if (swReady) swReady.then(() => setOffline(true)).catch(() => {}); }
+    else swPost({ type: 'map-ok', url: DEFAULT_MAP.url });
+  }
+  catch (e) { // 一時的な読み込み失敗で保存データを消さない
+    if (!blob) swPost({ type: 'map-bad', url: DEFAULT_MAP.url });
+    S.mapId = 'sample'; S.noSave = true; await showImage(sampleBlob(), true);
+  }
   // 保存済みのピン・位置合わせが別のマップ用なら使わない(旧版で画像を読み込んでいた場合はそのまま引き継ぐ)
   const legacyCustom = blob && S.savedMap === undefined;
   if (!legacyCustom && S.savedMap !== S.mapId) { S.start = null; S.flag = null; S.cal = []; }
