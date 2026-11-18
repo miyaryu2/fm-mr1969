@@ -1,8 +1,8 @@
 """公開中のフィールドマップを2台(iPhone相当・Android相当)で開き、共有・位置合わせ・圏外復帰を確認する。"""
-import hashlib, json, math, secrets, time, urllib.request, urllib.error
+import hashlib, json, math, os, secrets, time, urllib.request, urllib.error
 from playwright.sync_api import sync_playwright
 
-URL = 'https://miyaryu2.github.io/fm-mr1969/'
+URL = os.environ.get('FM_URL', 'https://miyaryu2.github.io/fm-mr1969/')  # 手元で試すときは FM_URL=http://127.0.0.1:ポート/ を指定
 DB = 'https://fm-mr1969-default-rtdb.asia-southeast1.firebasedatabase.app'
 ROOM = 'e2e-' + secrets.token_hex(4)
 KEY = hashlib.sha256(('fieldmap:' + ROOM).encode()).digest()[:16].hex()

@@ -218,6 +218,7 @@ const SH = {
   key: null, es: null, tree: {}, peers: [],    // key: 合言葉のハッシュ(DB上のルーム名)
   status: 'off',                               // off | connecting | ok | err
   lastSend: 0, lastPos: null, calSynced: false, skew: 0, myT: 0, retry: null,
+  calSent: [], // 自分が送った位置合わせ(比較用の文字列)。サーバから遅れて戻ってくる古い状態を見分ける
 };
 
 const S = {
@@ -690,11 +691,18 @@ function shOnData() {
 /* 位置合わせの共有。同じマップ画像(種類と画素数が一致)のときだけ反映する */
 function calSig() { return `${S.mapId}:${S.imgW}x${S.imgH}`; }
 function calNorm(c) { return [+(+c.x).toFixed(1), +(+c.y).toFixed(1), c.lat, c.lon]; }
+// 位置合わせを送る。送信は1つずつ順番に行う(同時に送ると、サーバに届く順番が入れ替わって古い状態で上書きされるため)。
+// 送信中に変更があったときは、送信が終わってから最新の状態を送る
+let calBusy = false, calDirty = false;
 function shPushCal() {
   if (!SH.on || !SH.key || S.noSave || !S.imgW) return;
+  if (calBusy) { calDirty = true; return; }
+  calBusy = true; calDirty = false;
   const b = { map: calSig(), t: { '.sv': 'timestamp' }, by: SH.name };
   if (S.cal.length) b.pts = S.cal.map(c => { const n = calNorm(c); return { x: n[0], y: n[1], lat: n[2], lon: n[3] }; });
-  fetch(shUrl('/cal'), { method: 'PUT', body: JSON.stringify(b) }).catch(() => {});
+  SH.calSent.push(JSON.stringify(S.cal.map(calNorm))); if (SH.calSent.length > 20) SH.calSent.shift();
+  fetch(shUrl('/cal'), { method: 'PUT', body: JSON.stringify(b) }).catch(() => {})
+    .then(() => { calBusy = false; if (calDirty) shPushCal(); });
 }
 function shSyncCal() {
   if (!SH.on || SH.status !== 'ok' || !S.imgW || S.noSave) return;
@@ -704,7 +712,10 @@ function shSyncCal() {
     .filter(q => q && [q.x, q.y, q.lat, q.lon].every(v => typeof v === 'number' && isFinite(v))) : null;
   // 参加直後は「ルームに登録済みならそれを採用、なければ自分のものを共有」。以後はルームの内容に合わせる
   if (pts && (pts.length || !first)) {
-    if (JSON.stringify(pts.map(calNorm)) !== JSON.stringify(S.cal.map(calNorm))) {
+    const remote = JSON.stringify(pts.map(calNorm)), local = JSON.stringify(S.cal.map(calNorm));
+    if (remote === local) SH.calSent = []; // サーバが自分の最新の状態に追いついた
+    // 自分が以前に送った古い状態が遅れて戻ってきた場合は無視する(続けて登録したときに点が消えるのを防ぐ)
+    else if (first || !SH.calSent.includes(remote)) {
       S.cal = pts.map(q => ({ x: q.x, y: q.y, lat: q.lat, lon: q.lon })); save(); refit();
       if (S.mode === 'cal') renderSheet();
     }

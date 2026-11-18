@@ -7,6 +7,7 @@
 | `e2e.py` | 公開版を2台相当(iPhone・Android)で開き、共有・位置合わせ・圏外表示を自動テストする |
 | `e2e_net.py` | 圏外中の送信・受信・表示を個別に確認する |
 | `offline_test.py` | 手元のファイルに対して、圏外でもアプリとマップが開くかを確認する |
+| `maps_test.py` | 手元のファイルに対して、フィールドの切り替え・フィールドごとの保存・旧データの引き継ぎを確認する |
 | `record.py` | 使い方の動画(`guide.mp4`)用に、アプリを自動操作して画面を1コマずつ書き出す |
 | `check.py` | 手元のマニュアル2ページで、動画が再生できるかを確認する |
 
@@ -28,6 +29,7 @@ python3 -m venv venv
 ./venv/bin/python ~/Projects/fm-mr1969/tools/e2e.py
 ./venv/bin/python ~/Projects/fm-mr1969/tools/e2e_net.py
 ./venv/bin/python ~/Projects/fm-mr1969/tools/offline_test.py ~/Projects/fm-mr1969
+./venv/bin/python ~/Projects/fm-mr1969/tools/maps_test.py ~/Projects/fm-mr1969
 ```
 
 - `e2e.py` は項目ごとに `OK` か `NG` を表示します。「Android相当が圏外になり、戻ると共有が自動で再開する」は、テストツールが圏外を完全には再現できないため必ず `NG` になります。この項目は `e2e_net.py` の結果で判断します。
