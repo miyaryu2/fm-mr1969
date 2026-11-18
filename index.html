@@ -96,6 +96,10 @@ header h1{font-size:15px;margin:0;font-weight:700}
   background:var(--panel);border:1px solid var(--line);color:var(--muted);
   font-size:12px;padding:4px 10px;border-radius:6px;pointer-events:none;
 }
+.credit{
+  position:absolute;left:max(8px,env(safe-area-inset-left,0px));bottom:6px;max-width:calc(100% - 90px);
+  font-size:10px;line-height:1.3;color:#fff;background:rgba(0,0,0,.5);padding:1px 6px;border-radius:4px;pointer-events:none;
+}
 .fabs{
   position:absolute;right:max(16px,env(safe-area-inset-right,0px));bottom:12px;
   display:flex;flex-direction:column;gap:8px;
@@ -166,7 +170,8 @@ nav button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
     </div>
   </div>
   <div class="hint" id="hint" hidden></div>
-  <div class="sample" id="sampleTag" hidden>標準マップを読み込めず、サンプルを表示中(再読み込みしてください)</div>
+  <div class="sample" id="sampleTag" hidden>マップを読み込めず、サンプルを表示中(再読み込みしてください)</div>
+  <div class="credit" id="credit" hidden></div>
   <div class="fabs">
     <button class="fab" id="btnMe" type="button" aria-label="現在地を中央に表示">現在地</button>
     <button class="fab" id="btnFit" type="button" aria-label="マップ全体を表示">全体</button>
@@ -189,8 +194,20 @@ nav button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
 const $ = id => document.getElementById(id);
 const map = $('map'), stage = $('stage'), img = $('img'), sheet = $('sheet');
 const LS_KEY = 'fieldmap.v1';
-// 標準マップ: サバゲーパラダイス公式フィールドマップ Ver.6.0(https://survivalgameparadise.com/facilities)。画像は再配布せず公式URLを直接参照する
-const DEFAULT_MAP = { id: 'sabapara-v6', url: 'https://survivalgameparadise.com/wp-content/uploads/2025/04/ver06_01.png', name: 'サバゲーパラダイス' };
+// 選べるフィールドマップ。id を変えると、各端末に保存したそのマップ用のピンと位置合わせは使われなくなる
+// - サバゲーパラダイス: 公式フィールドマップ Ver.6.0(https://survivalgameparadise.com/facilities)。画像は再配布せず公式URLを直接参照する
+// - 廃墟サバゲ: 国土地理院「全国最新写真(シームレス)」のズーム18を切り抜き、3倍に拡大したもの。表示時に出典(credit)を出す
+//   画像の四隅の緯度経度が分かっているので、位置合わせ(cal)を最初から入れておく
+const MAPS = [
+  { id: 'sabapara-v6', url: 'https://survivalgameparadise.com/wp-content/uploads/2025/04/ver06_01.png', name: 'サバゲーパラダイス' },
+  { id: 'haikyo-v1', url: 'maps/haikyo.jpg', name: '廃墟サバゲ', credit: '出典: 国土地理院「全国最新写真(シームレス)」',
+    cal: [{ x: 0, y: 0, lat: 35.9534099, lon: 139.5909816 }, { x: 810, y: 0, lat: 35.9534099, lon: 139.59243 },
+          { x: 0, y: 840, lat: 35.952194, lon: 139.5909816 }, { x: 810, y: 840, lat: 35.952194, lon: 139.59243 }] },
+];
+const DEFAULT_MAP = MAPS[0];
+function mapById(id) { return MAPS.find(m => m.id === id) || null; }
+// マップに最初から入っている位置合わせ(なければ空)
+function presetCal(id) { const m = mapById(id); return m && m.cal ? m.cal.map(c => ({ ...c })) : []; }
 
 // 位置共有: Firebase Realtime Database(REST + EventSource。SDKは使わない)
 const DB_URL = 'https://fm-mr1969-default-rtdb.asia-southeast1.firebasedatabase.app';
@@ -211,18 +228,26 @@ const S = {
   pending: null,           // 位置合わせで選択中の画像座標
   pos: null,               // {lat,lon,acc}
   gpsErr: '', fit: null, follow: false, sample: false, wake: false, offline: false, // offline: 圏外でも表示できる状態か
-  mapId: '', savedMap: undefined, noSave: false, // mapId: 'custom' | DEFAULT_MAP.id | 'sample'
+  mapId: '', savedMap: undefined, noSave: false, // mapId: 'custom' | MAPS の id | 'sample'
+  sel: undefined, byMap: {}, hasCustom: false,   // sel: 選んだマップ / byMap: マップごとのピンと位置合わせ / hasCustom: 読み込んだ画像があるか
 };
 
 /* ---------- 保存 ---------- */
 function save() {
   if (S.noSave) return;
-  try { localStorage.setItem(LS_KEY, JSON.stringify({ start: S.start, flag: S.flag, cal: S.cal, wake: S.wake, map: S.mapId })); } catch (e) {}
+  if (S.mapId && S.mapId !== 'sample') S.byMap[S.mapId] = { start: S.start, flag: S.flag, cal: S.cal };
+  try { localStorage.setItem(LS_KEY, JSON.stringify({ start: S.start, flag: S.flag, cal: S.cal, wake: S.wake, map: S.mapId, sel: S.sel, byMap: S.byMap })); } catch (e) {}
+}
+// 指定したマップ用に保存しておいたピンと位置合わせに切り替える
+function loadMapData(id) {
+  const d = S.byMap[id] || {};
+  S.start = d.start || null; S.flag = d.flag || null; S.cal = Array.isArray(d.cal) ? d.cal : presetCal(id); S.pending = null;
 }
 function load() {
   try {
     const d = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
     S.start = d.start || null; S.flag = d.flag || null; S.cal = Array.isArray(d.cal) ? d.cal : []; S.wake = !!d.wake; S.savedMap = d.map;
+    S.sel = d.sel; S.byMap = (d.byMap && typeof d.byMap === 'object') ? d.byMap : {};
   } catch (e) {}
 }
 function idb() {
@@ -391,12 +416,17 @@ function renderSheet() {
       h += `<div class="row"><button class="btn danger" data-act="sh-leave">共有をやめる</button><button class="btn" data-act="done">閉じる</button></div>`;
     }
   } else if (S.mode === 'menu') {
-    h = `<h2>設定</h2>
-      <div class="row"><button class="btn pri" data-act="pick">マップ画像を読み込む</button>
-      <button class="btn" data-act="wake">画面を消灯しない: ${S.wake ? 'オン' : 'オフ'}</button></div>
-      <p>標準マップは${DEFAULT_MAP.name}です。別の画像を読み込むと、スタート・フラッグ・位置合わせは新しいマップ用にリセットされます。画像と位置データはこの端末内にだけ保存されます。</p>
-      ${S.mapId === 'custom' ? `<div class="row"><button class="btn" data-act="default-map">標準マップ(${DEFAULT_MAP.name})に戻す</button></div>` : ''}
-      <div class="row"><button class="btn danger" data-act="reset-cal" ${S.cal.length ? '' : 'disabled'}>位置合わせをすべて消す</button>
+    const opts = MAPS.concat(S.hasCustom ? [{ id: 'custom', name: '読み込んだ画像' }] : []);
+    h = `<h2>フィールドマップ</h2>
+      <div class="row">${opts.map(m => `<button class="btn${m.id === S.mapId ? ' pri' : ''}" data-act="map" data-id="${m.id}" aria-pressed="${m.id === S.mapId}">${esc(m.name)}</button>`).join('')}</div>
+      <p>スタート・フラッグ・位置合わせは、フィールドごとに別々に保存されます。位置を共有するときは、全員が同じフィールドを選んでください。</p>
+      <h2>設定</h2>
+      <div class="row"><button class="btn" data-act="wake">画面を消灯しない: ${S.wake ? 'オン' : 'オフ'}</button>
+      <button class="btn" data-act="pick">マップ画像を読み込む</button></div>
+      <p>一覧にないフィールドは、マップ画像を読み込んで使えます。「読み込んだ画像」として1枚だけ保存され、読み込み直すと置き換わります。画像と位置データはこの端末内にだけ保存されます。</p>
+      <div class="row">${presetCal(S.mapId).length
+        ? `<button class="btn danger" data-act="reset-cal">位置合わせを初期状態に戻す</button>`
+        : `<button class="btn danger" data-act="reset-cal" ${S.cal.length ? '' : 'disabled'}>位置合わせをすべて消す</button>`}
       <button class="btn" data-act="done">閉じる</button></div>
       <p>電波がない場所での表示: ${S.offline ? '準備済み' : '未準備(電波のある場所で一度開き直してください)'}</p>
       <p><a href="manual.html" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">使い方(マニュアル)を開く</a></p>
@@ -404,6 +434,7 @@ function renderSheet() {
   }
   sheet.innerHTML = h; sheet.hidden = !h;
   $('sampleTag').hidden = !S.sample || S.mode !== 'view';
+  const cur = mapById(S.mapId), cr = $('credit'); cr.textContent = (cur && cur.credit) || ''; cr.hidden = !cr.textContent;
   requestAnimationFrame(render);
 }
 function refit() { S.fit = computeFit(S.cal); rebuildCalMarks(); renderStatus(); }
@@ -469,9 +500,9 @@ sheet.addEventListener('click', e => {
     else { $('calMsg').textContent = '読み取れませんでした。「緯度, 経度」の順に、数値を2つ入力してください。'; $('calMsg').style.color = 'var(--warn)'; }
   }
   else if (act === 'cal-del') { S.cal.splice(+b.dataset.i, 1); save(); refit(); shPushCal(); renderSheet(); }
-  else if (act === 'reset-cal') { S.cal = []; save(); refit(); shPushCal(); renderSheet(); }
+  else if (act === 'reset-cal') { S.cal = presetCal(S.mapId); save(); refit(); shPushCal(); renderSheet(); }
   else if (act === 'pick') { $('file').click(); }
-  else if (act === 'default-map') { restoreDefault(); }
+  else if (act === 'map') { switchMap(b.dataset.id); }
   else if (act === 'sh-join') { shJoin($('shName').value, $('shRoom').value); }
   else if (act === 'sh-leave') { shLeave(); renderSheet(); }
   else if (act === 'wake') { S.wake = !S.wake; save(); applyWake(); renderSheet(); }
@@ -489,10 +520,14 @@ function centerOn(p) { const m = mapSize(); S.tx = m.w / 2 - p.x * S.k; S.ty = m
 let objUrl = null;
 function showImage(src, sample) { // src: Blob または URL文字列
   return new Promise((res, rej) => {
-    const isBlob = typeof src !== 'string', url = isBlob ? URL.createObjectURL(src) : src, old = objUrl;
-    img.onload = () => { if (old) URL.revokeObjectURL(old); objUrl = isBlob ? url : null; S.imgW = img.naturalWidth; S.imgH = img.naturalHeight; S.sample = sample; $('sampleTag').hidden = !sample; fitView(); res(); };
-    img.onerror = () => { if (isBlob) URL.revokeObjectURL(url); rej(new Error('画像を表示できません')); };
-    img.src = url;
+    const isBlob = typeof src !== 'string', url = isBlob ? URL.createObjectURL(src) : src, pre = new Image();
+    // 先に読み込めるか確かめてから差し替える。失敗したときは今のマップをそのまま残す
+    pre.onload = () => {
+      img.onload = () => { const old = objUrl; if (old && old !== url) URL.revokeObjectURL(old); objUrl = isBlob ? url : null; S.imgW = img.naturalWidth; S.imgH = img.naturalHeight; S.sample = sample; $('sampleTag').hidden = !sample; fitView(); res(); };
+      img.src = url;
+    };
+    pre.onerror = () => { if (isBlob) URL.revokeObjectURL(url); rej(new Error('画像を表示できません')); };
+    pre.src = url;
   });
 }
 function sampleBlob() {
@@ -523,23 +558,29 @@ $('file').addEventListener('change', async e => {
     const blob = await new Promise(res => cv.toBlob(res, 'image/jpeg', 0.9));
     if (!blob) throw new Error('画像を変換できませんでした');
     let stored = true; try { await idbSet('image', blob); } catch (err) { stored = false; }
-    S.start = null; S.flag = null; S.cal = []; S.pending = null; S.mapId = 'custom'; S.noSave = false; save(); refit();
-    await showImage(blob, false);
+    save(); // いまのマップのピンと位置合わせを保存しておく
+    delete S.byMap.custom; S.hasCustom = stored;
+    S.start = null; S.flag = null; S.cal = []; S.pending = null; S.mapId = S.sel = 'custom'; S.noSave = false; save(); refit();
+    await showImage(blob, false); markOffline('custom');
     SH.calSynced = false; shSyncCal();
     S.mode = stored ? 'view' : 'menu'; renderSheet();
     if (!stored) msg('表示はできましたが、端末に保存できませんでした。次回開いたときに再度読み込みが必要です。');
   } catch (err) { msg('読み込めませんでした: ' + err.message); }
 });
 
-async function restoreDefault() {
-  if (!confirm('読み込んだ画像と、スタート・フラッグ・位置合わせを消して標準マップに戻します。よろしいですか?')) return;
-  const msg = t => { const m = $('menuMsg'); if (m) m.textContent = t; };
-  try { await showImage(DEFAULT_MAP.url, false); } catch (e) { msg('標準マップを読み込めませんでした。通信環境を確認してください。'); return; }
-  try { await idbDel('image'); } catch (e) {}
-  swPost({ type: 'map-ok', url: DEFAULT_MAP.url });
-  S.start = null; S.flag = null; S.cal = []; S.pending = null; S.mapId = DEFAULT_MAP.id; S.noSave = false; save(); refit();
+async function switchMap(id) {
+  if (id === S.mapId) return;
+  const m = mapById(id), msg = t => { const e = $('menuMsg'); if (e) e.textContent = t; };
+  let src = m ? m.url : null;
+  if (id === 'custom') { try { src = await idbGet('image'); } catch (e) {} }
+  if (!src) { msg('マップ画像が見つかりません。'); return; }
+  msg('切り替えています…');
+  save(); // いまのマップのピンと位置合わせを保存しておく
+  try { await showImage(src, false); }
+  catch (e) { msg('マップを読み込めませんでした。電波のある場所で、もう一度選んでください。'); return; }
+  S.mapId = S.sel = id; S.noSave = false; loadMapData(id); save(); refit(); markOffline(id);
   SH.calSynced = false; shSyncCal();
-  S.mode = 'view'; renderSheet();
+  renderSheet(); msg('');
 }
 
 /* ---------- GPS ---------- */
@@ -706,6 +747,13 @@ new ResizeObserver(() => {
 let swReady = null;
 function swPost(m) { if (swReady) swReady.then(r => { if (r.active) r.active.postMessage(m); }).catch(() => {}); }
 function setOffline(ok) { S.offline = ok; if (S.mode === 'menu') renderSheet(); }
+// 表示中のマップを、圏外でも表示できるようにする
+function markOffline(id) {
+  S.offline = false;
+  const m = mapById(id);
+  if (m && /^https?:/.test(m.url)) swPost({ type: 'map-ok', url: m.url }); // 他サイトの画像は sw.js に保存を頼む
+  else if (swReady) swReady.then(() => setOffline(true)).catch(() => {}); // 同じサイトの画像(sw.js が保存)と読み込んだ画像(端末内に保存済み)
+}
 if ('serviceWorker' in navigator) {
   swReady = navigator.serviceWorker.register('sw.js').then(() => navigator.serviceWorker.ready);
   swReady.catch(() => {});
@@ -714,22 +762,24 @@ if ('serviceWorker' in navigator) {
 
 /* ---------- 起動 ---------- */
 (async function boot() {
-  load(); refit(); renderSheet();
+  load(); S.noSave = true; refit(); renderSheet(); // マップが決まるまでは保存しない
   let blob = null; try { blob = await idbGet('image'); } catch (e) {}
-  S.mapId = blob ? 'custom' : DEFAULT_MAP.id;
-  try {
-    await showImage(blob || DEFAULT_MAP.url, false);
-    // 表示できた画像だけを保存対象にする。読み込んだ画像は端末内(IndexedDB)に保存済み
-    if (blob) { if (swReady) swReady.then(() => setOffline(true)).catch(() => {}); }
-    else swPost({ type: 'map-ok', url: DEFAULT_MAP.url });
-  }
+  S.hasCustom = !!blob;
+  const legacyCustom = blob && S.savedMap === undefined; // 旧版で画像を読み込んでいた場合
+  // 選んだマップを表示する。旧版から引き継いで未選択なら、読み込んだ画像があればそれ、なければ標準マップ
+  const id = blob && (S.sel === 'custom' || S.sel === undefined) ? 'custom' : (mapById(S.sel) ? S.sel : DEFAULT_MAP.id);
+  S.mapId = S.sel = id;
+  try { await showImage(id === 'custom' ? blob : mapById(id).url, false); markOffline(id); }
   catch (e) { // 一時的な読み込み失敗で保存データを消さない
-    if (!blob) swPost({ type: 'map-bad', url: DEFAULT_MAP.url });
-    S.mapId = 'sample'; S.noSave = true; await showImage(sampleBlob(), true);
+    const m = mapById(id); if (m && /^https?:/.test(m.url)) swPost({ type: 'map-bad', url: m.url });
+    S.mapId = 'sample'; await showImage(sampleBlob(), true);
   }
-  // 保存済みのピン・位置合わせが別のマップ用なら使わない(旧版で画像を読み込んでいた場合はそのまま引き継ぐ)
-  const legacyCustom = blob && S.savedMap === undefined;
-  if (!legacyCustom && S.savedMap !== S.mapId) { S.start = null; S.flag = null; S.cal = []; }
+  // 保存済みのピン・位置合わせが別のマップ用なら、それを元のマップ用に取っておき、表示中のマップ用に切り替える
+  if (!legacyCustom && S.savedMap !== S.mapId) {
+    if (S.savedMap && S.savedMap !== 'sample' && !S.byMap[S.savedMap]) S.byMap[S.savedMap] = { start: S.start, flag: S.flag, cal: S.cal };
+    loadMapData(S.mapId);
+  }
+  S.noSave = S.mapId === 'sample';
   save(); refit(); renderSheet();
   startGps(); applyWake();
   shLoad(); if (SH.on && SH.name && SH.room) shJoin(SH.name, SH.room);

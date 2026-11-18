@@ -1,8 +1,8 @@
 'use strict';
-// 電波が弱い場所でも開けるよう、アプリ本体・マニュアル・標準マップ画像を端末に保存する。
+// 電波が弱い場所でも開けるよう、アプリ本体・マニュアル・フィールドマップ画像を端末に保存する。
 // 位置共有(Firebase)と動画(guide.mp4)は対象外で、そのまま通信する。
-const APP = 'fm-app-v1', MAP = 'fm-map-v1';
-const SHELL = ['./', 'quick.html', 'manual.html', 'guide-poster.jpg'];
+const APP = 'fm-app-v2', MAP = 'fm-map-v1';
+const SHELL = ['./', 'quick.html', 'manual.html', 'guide-poster.jpg', 'maps/haikyo.jpg'];
 const NET_WAIT = 2500; // 通信がこの時間(ms)で返らなければ、保存済みの版を表示する
 
 self.addEventListener('install', e => {
