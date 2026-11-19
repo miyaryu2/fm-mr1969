@@ -91,6 +91,7 @@ header h1{font-size:15px;margin:0;font-weight:700}
   background:var(--fg);color:var(--bg);padding:6px 14px;border-radius:999px;font-size:13px;font-weight:600;
   pointer-events:none;text-align:center;
 }
+.toast{top:auto;bottom:56px}
 .sample{
   position:absolute;left:max(16px,env(safe-area-inset-left,0px));bottom:12px;
   background:var(--panel);border:1px solid var(--line);color:var(--muted);
@@ -170,6 +171,7 @@ nav button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
     </div>
   </div>
   <div class="hint" id="hint" hidden></div>
+  <div class="hint toast" id="toast" hidden></div>
   <div class="sample" id="sampleTag" hidden>マップを読み込めず、サンプルを表示中(再読み込みしてください)</div>
   <div class="credit" id="credit" hidden></div>
   <div class="fabs">
@@ -356,11 +358,21 @@ function renderStatus() {
   cc.className = 'chip' + (S.fit ? ' ok' : '');
   if (S.gpsErr) { gc.textContent = S.gpsErr; gc.className = 'chip ng'; }
   else if (S.pos) {
-    let out = false; const me = mePoint();
-    if (me) { const mx = S.imgW * 0.5, my = S.imgH * 0.5; out = me.x < -mx || me.x > S.imgW + mx || me.y < -my || me.y > S.imgH + my; }
+    const out = isOut(mePoint());
     gc.textContent = `GPS ±${Math.round(S.pos.acc)}m` + (out ? '・マップ範囲外' : '');
     gc.className = 'chip' + (S.pos.acc <= 15 && !out ? ' ok' : '');
   } else { gc.textContent = 'GPS 取得中'; gc.className = 'chip'; }
+}
+// マップ画像の外側(縦横それぞれ半分の余白を超えた位置)にいるか
+function isOut(me) {
+  if (!me) return false;
+  const mx = S.imgW * 0.5, my = S.imgH * 0.5;
+  return me.x < -mx || me.x > S.imgW + mx || me.y < -my || me.y > S.imgH + my;
+}
+let toastTimer = 0;
+function toast(t) {
+  const el = $('toast'); el.textContent = t; el.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 3500);
 }
 function fmt(v) { return v.toFixed(6); }
 function esc(t) { return String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -513,6 +525,8 @@ $('btnFit').addEventListener('click', fitView);
 $('btnMe').addEventListener('click', () => {
   const me = mePoint();
   if (!me) { if (!S.fit && S.mode !== 'cal') setMode('cal'); return; }
+  // 範囲外で中央に寄せるとマップが画面から消えるので、動かさずに知らせる
+  if (isOut(me)) { S.follow = false; fitView(); toast('マップの範囲外にいます(フィールドに着くと表示されます)'); return; }
   S.follow = !S.follow; if (S.follow) centerOn(me); render();
 });
 function centerOn(p) { const m = mapSize(); S.tx = m.w / 2 - p.x * S.k; S.ty = m.h / 2 - p.y * S.k; }
@@ -590,7 +604,7 @@ function startGps() {
   if (!window.isSecureContext) { S.gpsErr = 'GPS 不可(HTTPSが必要)'; renderStatus(); return; }
   navigator.geolocation.watchPosition(p => {
     S.pos = { lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy || 0 }; S.gpsErr = '';
-    if (S.follow) { const me = mePoint(); if (me) centerOn(me); }
+    if (S.follow) { const me = mePoint(); if (me && !isOut(me)) centerOn(me); }
     renderStatus(); render(); shSend();
     if (S.mode === 'cal' && S.pending && document.activeElement !== $('latlon')) renderSheet();
   }, err => {
